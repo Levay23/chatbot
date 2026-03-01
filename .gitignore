@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+dist/
+build/
+.next/
+out/
+.env
+.env.*
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Test outputs
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Gemini specific
+.gemini/
+.agents/
+_agents/
+brain/
+tmp/
+
+# WhatsApp Session
+.wwebjs_auth/
+.wwebjs_cache/
+tokens/
+
+# Test and Migration Scripts
+backend/test_*.js
+backend/list_*.js
+backend/fix_*.js
+backend/inspect_*.js
+backend/merge_*.js
+backend/cleanup_*.js
+backend/nuke_migrate.py
+backend/test_api.js
