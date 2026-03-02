@@ -45,8 +45,8 @@ export const processMessage = async (customer, incomingMessage) => {
             }))
         ];
 
-        // 7. Temperatura según estado
-        const temperature = currentStep === 'BROWSING' ? 0.6 : 0.3;
+        // 7. Temperatura fija más baja para mayor estabilidad y menos repetición
+        const temperature = 0.4;
 
         let aiResponse = "";
         let attempts = 0;

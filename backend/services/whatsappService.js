@@ -139,7 +139,10 @@ export const startWhatsApp = async () => {
                     if (m.includes('efectivo') || m === '1') {
                         const currentNotes = db.prepare('SELECT notes FROM customers WHERE id = ?').get(customer.id)?.notes || null;
                         const order = createOrderFromState(customer.id, 'Efectivo', null, null, currentNotes);
-                        if (order && io) io.emit('new_order', { id: order.orderId, status: 'PENDING' });
+                        if (order && io) {
+                            io.emit('new_order', { id: order.orderId, status: 'PENDING' });
+                            updateCustomerState(customer.id, 'COMPLETED');
+                        }
                         await msg.reply("✅ *¡Listo!* Tu pedido en efectivo ha sido registrado. Lo llevaremos lo antes posible. ¡Gracias!");
                         return;
                     } else if (m.includes('transferencia') || m.includes('nequi') || m === '2') {
@@ -217,11 +220,27 @@ export const startWhatsApp = async () => {
                         // Obtener notas actuales del cliente antes de crear la orden
                         const currentNotes = db.prepare('SELECT notes FROM customers WHERE id = ?').get(customer.id)?.notes || null;
 
+                        // Validación de Seguridad: No crear orden si no hay dirección mínima
+                        const checkCust = db.prepare('SELECT address FROM customers WHERE id = ?').get(customer.id);
+                        if (!checkCust?.address || checkCust.address.length < 5) {
+                            console.log(`⚠️ IA intentó crear orden para ${customer.phone} sin dirección. Corrigiendo estado.`);
+                            updateCustomerState(customer.id, 'AWAITING_ADDRESS');
+                            await msg.reply("😅 ¡Casi lo tengo! Pero antes de confirmar el pago, por favor regálame tu **Nombre y Dirección exacta** para saber a dónde llevarte el pedido pronto.");
+                            return;
+                        }
+
                         const order = createOrderFromState(customer.id, paymentMethod, null, null, currentNotes);
                         if (order && io) {
                             io.emit('new_order', { id: order.orderId, status: 'PENDING' });
-                            // Limpiar notas del cliente después de crear la orden
                             db.prepare('UPDATE customers SET notes = NULL WHERE id = ?').run(customer.id);
+
+                            // RESPUESTA AUTOMÁTICA DE PAGO (Failsafe)
+                            if (paymentMethod.toLowerCase().includes('transferencia')) {
+                                const paymentInfo = db.prepare("SELECT value FROM config_bot WHERE key = 'payment_info'").get()?.value || "Nequi: 3207008433";
+                                setTimeout(async () => {
+                                    await clientInstance.sendMessage(msg.from, `💳 *Datos de Pago:*\n${paymentInfo}\n\nPor favor envíame el comprobante por aquí mismo para procesar tu pedido. ✅`);
+                                }, 1500);
+                            }
                         } else {
                             console.error(`❌ Falló la creación de orden para ${customer.phone}. Notificando error.`);
                             await msg.reply("😅 Amigo, tuve un problemita técnico anotando tu pedido exacto. ¿Me confirmas de nuevo los platos para asegurarme de que todo esté perfecto? 🙏");

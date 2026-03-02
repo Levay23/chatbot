@@ -48,11 +48,9 @@ const getStepInstruction = (step, customerName) => {
         'BROWSING': `Estás en etapa de navegación. Tu objetivo es que el cliente elija sus productos. 
                      IMPORTANTE: 
                      1. Si el cliente elige productos, incluye <cart>{"items":[...]}</cart>.
-                     2. Si el cliente tiene peticiones especiales (ej: "sin cebolla", "bien cocido"), o si confirma el pedido detallado, incluye <notes>DETALLE COMPLETO DEL PEDIDO AQUÍ</notes>.
-                     3. Si el cliente ya decidió y quiere confirmar, incluye <state>AWAITING_ADDRESS</state>.
-                     4. Si el cliente ya dio su dirección y quiere pagar, incluye <state>AWAITING_PAYMENT</state>.
-                     5. Si el cliente dice que pagará por Nequi/Transferencia, incluye <create_order>Transferencia</create_order> y <state>AWAITING_RECEIPT</state>.
-                     6. Si el cliente dice que pagará en efectivo, incluye <create_order>Efectivo</create_order> y <state>COMPLETED</state>.`,
+                     2. Si el cliente tiene peticiones especiales (ej: "sin cebolla"), incluye <notes>...</notes>.
+                     3. Si el cliente quiere confirmar el pedido, incluye <state>AWAITING_ADDRESS</state>. 
+                     ⛔ REGLA DE ORO: NO uses <create_order> ni <state>AWAITING_RECEIPT</state> si no conoces su Nombre y Dirección. Primero envíalo a AWAITING_ADDRESS.`,
 
         'AWAITING_ADDRESS': `El cliente ya confirmó su pedido. Pide amablemente su NOMBRE y DIRECCIÓN.
                             Si el cliente ya la proporcionó, incluye <state>AWAITING_PAYMENT</state>.`,
@@ -80,17 +78,23 @@ export const buildSystemPrompt = (mode, context, filteredMenu, config = {}) => {
 
 ${salesRulesPrompt}
 
+═══ DATOS DE PAGO (PARA TU INFORMACIÓN) ═══
+${config.payment_info || "Nequi: 3207008433 - Luis Castillo"}
+
 ═══ ESTADO ACTUAL DEL FLUJO ═══
 Paso actual: ${state.current_step}
 Instrucción para ti: ${stepInstruction}
 
 ═══ CONTEXTO DEL CLIENTE ═══
+- Nombre: ${profile.name || 'Desconocido'}
+- Dirección: ${context.state.address || 'Desconocida'}
 - Pedidos anteriores: ${profile.total_orders}
-- Preferencias: ${profile.preferences}
 - Memoria: ${context.memory}
 
 ═══ MENÚ DISPONIBLE ═══
 ${filteredMenu}
 
-⚠️ IMPORTANTE: No generes JSON. El backend se encarga de eso. Tú solo conversa y guía al cliente según el "Paso actual".`;
+⚠️ IMPORTANTE: 
+1. Si el cliente pide pagar, pero no ha dado dirección, pídesela amablemente y usa <state>AWAITING_ADDRESS</state>.
+2. No repitas el pedido muchas veces, solo confírmalo una vez de forma natural.`;
 };
