@@ -1,4 +1,6 @@
 import axios from 'axios';
+import FormData from 'form-data';
+import { Readable } from 'stream';
 import { getAIContext, saveMessage } from './memoryService.js';
 import { classifyIntent, getFilteredMenu, buildSystemPrompt } from './salesEngine.js';
 import db from '../database/db.js';
@@ -87,5 +89,46 @@ export const processMessage = async (customer, incomingMessage) => {
     } catch (error) {
         console.error('❌ Error en AI Service:', error.message);
         return "Lo siento, hubo un pequeño error. ¿Puedes intentar de nuevo?";
+    }
+};
+
+/**
+ * Transcribe un audio usando Groq Whisper
+ * @param {Buffer} audioBuffer - El buffer del audio descargado
+ * @param {string} mimetype - El tipo de archivo (ej: audio/ogg; codecs=opus)
+ * @returns {Promise<string>} - El texto transcrito
+ */
+export const transcribeAudio = async (audioBuffer, mimetype) => {
+    console.log(`🎙️ [AI - Whisper] Transcribiendo audio (${mimetype})...`);
+
+    try {
+        const formData = new FormData();
+
+        // Convertir buffer a stream legible para form-data
+        const stream = Readable.from(audioBuffer);
+
+        // Determinar extensión basándose en mimetype (Whisper prefiere .ogg, .mp3, .wav)
+        const filename = mimetype.includes('ogg') ? 'audio.ogg' : 'audio.mp3';
+
+        formData.append('file', stream, { filename, contentType: mimetype });
+        formData.append('model', 'whisper-large-v3-turbo');
+        formData.append('language', 'es');
+        formData.append('response_format', 'text');
+
+        const response = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', formData, {
+            headers: {
+                ...formData.getHeaders(),
+                'Authorization': `Bearer ${GROQ_API_KEY}`
+            },
+            timeout: 20000
+        });
+
+        const transcription = typeof response.data === 'string' ? response.data : response.data.text;
+        console.log(`📝 Transcripción exitosa: "${transcription}"`);
+        return transcription;
+
+    } catch (error) {
+        console.error('❌ Error en Transcripción Whisper:', error.response?.data || error.message);
+        throw new Error('No pude entender el audio, ¿podrías repetírmelo por texto?');
     }
 };

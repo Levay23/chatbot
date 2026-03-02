@@ -1,9 +1,10 @@
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode-terminal';
-import { getOrCreateCustomer } from './memoryService.js';
-import { processMessage } from './aiService.js';
-import { processOrderJSON } from './orderService.js';
+import { getOrCreateCustomer, getAIContext, updateCustomerState } from './memoryService.js';
+import { processMessage, transcribeAudio } from './aiService.js';
+import { createOrderFromState } from './orderService.js';
+import { classifyIntent } from './salesEngine.js';
 import { exec } from 'child_process';
 import db from '../database/db.js';
 
@@ -55,6 +56,26 @@ export const startWhatsApp = async () => {
                 const customer = getOrCreateCustomer(msg.from, name);
                 const context = getAIContext(customer.id);
                 let currentStep = context.state.current_step;
+
+                // --- 0. MANEJO DE NOTAS DE VOZ (Transcripción) ---
+                if (msg.type === 'audio' || msg.type === 'ptt') {
+                    try {
+                        const media = await msg.downloadMedia();
+                        if (media) {
+                            const audioBuffer = Buffer.from(media.data, 'base64');
+                            const transcription = await transcribeAudio(audioBuffer, media.mimetype);
+
+                            if (transcription) {
+                                console.log(`🎤 Audio transcrito para ${msg.from}: ${transcription}`);
+                                msg.body = transcription; // Inyectamos el texto para que siga el flujo normal
+                            }
+                        }
+                    } catch (transcErr) {
+                        console.error('❌ Error transcribiendo audio:', transcErr.message);
+                        await msg.reply("😅 Amigo, no alcancé a escucharte bien. ¿Me lo puedes escribir o enviar de nuevo?");
+                        return;
+                    }
+                }
 
                 // --- 1. MANEJO DE COMPROBANTES (AWAITING_RECEIPT) ---
                 if (msg.hasMedia && currentStep === 'AWAITING_RECEIPT') {
