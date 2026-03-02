@@ -101,34 +101,36 @@ export const processMessage = async (customer, incomingMessage) => {
 export const transcribeAudio = async (audioBuffer, mimetype) => {
     console.log(`🎙️ [AI - Whisper] Transcribiendo audio (${mimetype})...`);
 
-    try {
-        const formData = new FormData();
+    const apiKeys = [GROQ_API_KEY, GROQ_API_KEY_2].filter(Boolean);
 
-        // Convertir buffer a stream legible para form-data
-        const stream = Readable.from(audioBuffer);
+    for (const apiKey of apiKeys) {
+        try {
+            const formData = new FormData();
+            const stream = Readable.from(audioBuffer);
+            const filename = mimetype.includes('ogg') ? 'audio.ogg' : 'audio.mp3';
 
-        // Determinar extensión basándose en mimetype (Whisper prefiere .ogg, .mp3, .wav)
-        const filename = mimetype.includes('ogg') ? 'audio.ogg' : 'audio.mp3';
+            formData.append('file', stream, { filename, contentType: mimetype });
+            formData.append('model', 'whisper-large-v3-turbo');
+            formData.append('language', 'es');
+            formData.append('response_format', 'text');
 
-        formData.append('file', stream, { filename, contentType: mimetype });
-        formData.append('model', 'whisper-large-v3-turbo');
-        formData.append('language', 'es');
-        formData.append('response_format', 'text');
+            const response = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', formData, {
+                headers: { ...formData.getHeaders(), 'Authorization': `Bearer ${apiKey}` },
+                timeout: 20000
+            });
 
-        const response = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', formData, {
-            headers: {
-                ...formData.getHeaders(),
-                'Authorization': `Bearer ${GROQ_API_KEY}`
-            },
-            timeout: 20000
-        });
-
-        const transcription = typeof response.data === 'string' ? response.data : response.data.text;
-        console.log(`📝 Transcripción exitosa: "${transcription}"`);
-        return transcription;
-
-    } catch (error) {
-        console.error('❌ Error en Transcripción Whisper:', error.response?.data || error.message);
-        throw new Error('No pude entender el audio, ¿podrías repetírmelo por texto?');
+            const transcription = typeof response.data === 'string' ? response.data : response.data.text;
+            console.log(`📝 Transcripción exitosa: "${transcription}"`);
+            return transcription;
+        } catch (error) {
+            if (error.response?.status === 429) {
+                console.warn(`⚠️ Key ${apiKeys.indexOf(apiKey) + 1} agotada para audio. Rotando...`);
+                continue;
+            }
+            console.error('❌ Error en Transcripción Whisper:', error.response?.data || error.message);
+            throw new Error('No pude entender el audio, ¿podrías repetírmelo por texto?');
+        }
     }
+
+    throw new Error('No pude entender el audio, ¿podrías repetírmelo por texto?');
 };
