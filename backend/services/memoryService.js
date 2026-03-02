@@ -74,28 +74,46 @@ export const summarizeConversation = async (customerId) => {
  * Obtiene el contexto optimizado para la IA
  */
 export const getAIContext = (customerId) => {
-    // 1. Obtener los últimos 6 mensajes
+    // 1. Obtener los últimos 12 mensajes (Aumentado de 6 a 12)
     const lastMessages = db.prepare(`
         SELECT role, message as content FROM conversations 
         WHERE customer_id = ? 
-        ORDER BY timestamp DESC LIMIT 6
+        ORDER BY timestamp DESC LIMIT 12
     `).all(customerId).reverse();
 
     // 2. Obtener resumen de memoria
     const summary = db.prepare('SELECT summary_text FROM memory_summary WHERE customer_id = ?').get(customerId);
 
-    // 3. Obtener perfil del cliente
-    const profile = db.prepare('SELECT total_orders, preferences, notes FROM customers WHERE id = ?').get(customerId);
+    // 3. Obtener perfil del cliente y ESTADO actual
+    const customer = db.prepare('SELECT total_orders, preferences, notes, current_step, current_cart FROM customers WHERE id = ?').get(customerId);
 
     return {
         messages: lastMessages,
         memory: summary ? summary.summary_text : "Cliente nuevo o sin historial previo.",
         profile: {
-            total_orders: profile?.total_orders || 0,
-            preferences: profile?.preferences || "No detectadas",
-            notes: profile?.notes || "Ninguna"
+            total_orders: customer?.total_orders || 0,
+            preferences: customer?.preferences || "No detectadas",
+            notes: customer?.notes || "Ninguna"
+        },
+        state: {
+            current_step: customer?.current_step || 'BROWSING',
+            current_cart: customer?.current_cart ? JSON.parse(customer.current_cart) : null
         }
     };
+};
+
+/**
+ * Actualiza el estado del cliente en la máquina de estados
+ */
+export const updateCustomerState = (customerId, step, cart = null) => {
+    if (cart !== null) {
+        db.prepare('UPDATE customers SET current_step = ?, current_cart = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(step, JSON.stringify(cart), customerId);
+    } else {
+        db.prepare('UPDATE customers SET current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(step, customerId);
+    }
+    console.log(`📌 Estado de cliente ${customerId} actualizado a: ${step}`);
 };
 
 /**
@@ -107,11 +125,14 @@ export const updateCustomerProfile = (customerId, orderData) => {
 
     // Lógica simple de preferencias (se puede mejorar con IA luego)
     let prefs = customer?.preferences || "";
-    orderData.items.forEach(item => {
-        if (!prefs.includes(item.product_name)) {
-            prefs += (prefs ? ", " : "") + item.product_name;
-        }
-    });
+    if (orderData.items) {
+        orderData.items.forEach(item => {
+            const name = item.product_name || item.name;
+            if (name && !prefs.includes(name)) {
+                prefs += (prefs ? ", " : "") + name;
+            }
+        });
+    }
 
     db.prepare('UPDATE customers SET total_orders = ?, preferences = ? WHERE id = ?')
         .run(newTotal, prefs, customerId);
@@ -139,8 +160,9 @@ export const getHistory = (customerId, limit = 50) => {
 export const getOrCreateCustomer = (phone, name) => {
     let customer = db.prepare('SELECT * FROM customers WHERE phone = ?').get(phone);
     if (!customer) {
-        const result = db.prepare('INSERT INTO customers (phone, name) VALUES (?, ?)').run(phone, name);
-        customer = { id: result.lastInsertRowid, phone, name };
+        const result = db.prepare('INSERT INTO customers (phone, name, current_step) VALUES (?, ?, ?)')
+            .run(phone, name, 'BROWSING');
+        customer = { id: result.lastInsertRowid, phone, name, current_step: 'BROWSING' };
     }
     return customer;
 };
@@ -153,7 +175,7 @@ export const createOrder = (phone, items, total, paymentMethod) => {
     const orderId = info.lastInsertRowid;
 
     for (const item of items) {
-        db.prepare('INSERT INTO order_items (order_id, product_name, quantity, price) VALUES (?, ?, ?, ?)').run(orderId, item.name, item.quantity, item.price);
+        db.prepare('INSERT INTO order_items (order_id, product_name, quantity, price) VALUES (?, ?, ?, ?)').run(orderId, item.name || item.product_name, item.quantity, item.price);
     }
 
     // Actualizar perfil tras crear orden

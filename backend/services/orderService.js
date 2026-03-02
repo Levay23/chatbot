@@ -1,49 +1,50 @@
 import db from '../database/db.js';
+import { updateCustomerProfile, updateCustomerState } from './memoryService.js';
 
 /**
- * Valida y procesa un pedido JSON generado por la IA
+ * Crea una orden basada en el estado actual guardado en la DB (current_cart)
  */
-export const processOrderJSON = (customerId, orderData) => {
-    console.log(`📦 Procesando pedido JSON para cliente ${customerId}...`);
+export const createOrderFromState = (customerId, paymentMethod, name = null, address = null) => {
+    console.log(`📦 Creando pedido desde estado para cliente ${customerId}...`);
 
     try {
-        if (!orderData.items || !Array.isArray(orderData.items)) {
-            throw new Error('Formato de ítems inválido');
+        const customer = db.prepare('SELECT current_cart, name, address FROM customers WHERE id = ?').get(customerId);
+        if (!customer || !customer.current_cart) {
+            throw new Error('No hay un carrito activo para este cliente');
         }
 
-        // 1. Validar productos y PRECIOS reales desde la BD (No confiar en la IA)
+        const cart = JSON.parse(customer.current_cart);
+        if (!cart.items || cart.items.length === 0) {
+            throw new Error('El carrito está vacío');
+        }
+
+        // 1. Validar productos y calcular total real
         let totalReal = 0;
         const validatedItems = [];
 
-        for (const item of orderData.items) {
-            // Buscamos el producto por nombre (aproximado o exacto)
-            const product = db.prepare('SELECT id, name, price, active FROM products WHERE name LIKE ?').get(`%${item.product_name}%`);
+        for (const item of cart.items) {
+            const product = db.prepare('SELECT id, name, price, active FROM products WHERE name LIKE ?').get(`%${item.product_name || item.name}%`);
 
             if (product && product.active) {
                 const qty = item.quantity || 1;
-                const price = product.price;
-                totalReal += (price * qty);
+                totalReal += (product.price * qty);
                 validatedItems.push({
                     product_id: product.id,
                     name: product.name,
                     quantity: qty,
-                    price: price
+                    price: product.price
                 });
-            } else {
-                console.warn(`⚠️ Producto no encontrado o inactivo: ${item.product_name}`);
             }
         }
 
-        if (validatedItems.length === 0) {
-            throw new Error('No se encontraron productos válidos en el pedido');
-        }
+        if (validatedItems.length === 0) throw new Error('No hay productos válidos');
 
-        // 2. Insertar orden en la DB
-        const paymentMethod = orderData.metodo_pago || 'Efectivo';
-        const notes = orderData.notes || '';
+        // 2. Insertar orden
+        const finalName = name || customer.name || 'Cliente';
+        const finalAddress = address || customer.address || 'Recoge en local';
 
-        const stmt = db.prepare('INSERT INTO orders (customer_id, total, payment_method, notes) VALUES (?, ?, ?, ?)');
-        const info = stmt.run(customerId, totalReal, paymentMethod, notes);
+        const info = db.prepare('INSERT INTO orders (customer_id, total, payment_method) VALUES (?, ?, ?)')
+            .run(customerId, totalReal, paymentMethod);
         const orderId = info.lastInsertRowid;
 
         // 3. Insertar items
@@ -52,29 +53,28 @@ export const processOrderJSON = (customerId, orderData) => {
             itemStmt.run(orderId, item.product_id, item.name, item.quantity, item.price);
         }
 
-        // 4. Actualizar perfil del cliente (total_orders, preferences, name, address)
-        const currentOrders = db.prepare('SELECT total_orders, preferences, name, address FROM customers WHERE id = ?').get(customerId);
-        const newTotal = (currentOrders?.total_orders || 0) + 1;
+        // 4. Actualizar perfil y Resetear estado
+        db.prepare('UPDATE customers SET name = ?, address = ?, current_cart = NULL WHERE id = ?')
+            .run(finalName, finalAddress, customerId);
 
-        // Actualizar datos de envío si se recibieron
-        const newName = orderData.nombre_cliente || currentOrders?.name;
-        const newAddress = orderData.direccion || currentOrders?.address;
+        updateCustomerProfile(customerId, { items: validatedItems });
+        updateCustomerState(customerId, 'COMPLETED');
 
-        let prefs = currentOrders?.preferences || "";
-        validatedItems.forEach(item => {
-            if (!prefs.includes(item.name)) {
-                prefs += (prefs ? ", " : "") + item.name;
-            }
-        });
-
-        db.prepare('UPDATE customers SET name = ?, address = ?, total_orders = ?, preferences = ?, last_order_date = CURRENT_TIMESTAMP WHERE id = ?')
-            .run(newName, newAddress, newTotal, prefs, customerId);
-
-        console.log(`✅ Pedido #${orderId} creado con total real: $${totalReal}`);
-        return { orderId, total: totalReal, items: validatedItems };
+        console.log(`✅ Pedido #${orderId} creado con éxito.`);
+        return { orderId, total: totalReal };
 
     } catch (error) {
-        console.error('❌ Error en OrderService:', error.message);
+        console.error('❌ Error en createOrderFromState:', error.message);
         return null;
     }
+};
+
+/**
+ * (Deprecado) Procesa JSON de la IA - Se mantiene por compatibilidad temporal
+ */
+export const processOrderJSON = (customerId, orderData) => {
+    console.log("⚠️ Llamada a processOrderJSON (Deprecado). Redirigiendo...");
+    // Intentar extraer datos y guardar en cart antes de procesar si fuera necesario, 
+    // pero el nuevo flujo debería usar createOrderFromState.
+    return null;
 };

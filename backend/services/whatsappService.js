@@ -45,105 +45,88 @@ export const startWhatsApp = async () => {
             console.log(`📩 [${new Date().toLocaleTimeString()}] Recibido de ${msg.from}: ${msg.body || (msg.hasMedia ? '[MULTIMEDIA]' : '')}`);
 
             try {
-                // Verificar si el bot está activo en la BD
                 const botActiveConfig = db.prepare("SELECT value FROM config_bot WHERE key = 'bot_active'").get();
                 const isBotActive = botActiveConfig ? botActiveConfig.value === 'true' : true;
-
                 if (!isBotActive) return;
                 if (msg.from.includes('@g.us')) return;
 
                 const contact = await msg.getContact();
                 const name = contact.pushname || contact.name || 'Cliente';
                 const customer = getOrCreateCustomer(msg.from, name);
+                const context = getAIContext(customer.id);
+                let currentStep = context.state.current_step;
 
-                // --- MANEJO DE COMPROBANTES (MULTIMEDIA) ---
-                if (msg.hasMedia) {
-                    // Procesamiento silencioso de comprobantes (solicitado por el usuario)
-                    const lastOrder = db.prepare(`
-                        SELECT id FROM orders 
-                        WHERE customer_id = ? AND payment_method = 'Transferencia' AND status = 'PENDING'
-                        ORDER BY created_at DESC LIMIT 1
-                    `).get(customer.id);
+                // --- 1. MANEJO DE COMPROBANTES (AWAITING_RECEIPT) ---
+                if (msg.hasMedia && currentStep === 'AWAITING_RECEIPT') {
+                    const media = await msg.downloadMedia();
+                    if (media) {
+                        const receiptData = `data:${media.mimetype};base64,${media.data}`;
+                        const lastOrderId = db.prepare('SELECT id FROM orders WHERE customer_id = ? ORDER BY created_at DESC LIMIT 1').get(customer.id).id;
+                        db.prepare('UPDATE orders SET receipt = ? WHERE id = ?').run(receiptData, lastOrderId);
+                        updateCustomerState(customer.id, 'COMPLETED');
 
-                    if (lastOrder) {
-                        try {
-                            const media = await msg.downloadMedia();
-                            if (media) {
-                                // Convertir a DataURL o guardar en disco (aquí usamos DataURL para simplicidad de visualización inmediata)
-                                const receiptData = `data:${media.mimetype};base64,${media.data}`;
-
-                                db.prepare('UPDATE orders SET receipt = ? WHERE id = ?').run(receiptData, lastOrder.id);
-                                console.log(`✅ Comprobante vinculado al pedido #${lastOrder.id}`);
-
-                                if (io) {
-                                    io.emit('order_updated', { id: lastOrder.id, hasReceipt: true });
-                                }
-
-                                return; // Proceso silencioso, el usuario verifica en el panel
-                            }
-                        } catch (mediaErr) {
-                            console.error('❌ Error descargando multimedia:', mediaErr.message);
-                        }
+                        if (io) io.emit('order_updated', { id: lastOrderId, hasReceipt: true });
+                        await msg.reply("✅ *¡Recibido!* Muchas gracias por tu pago. Ya estamos procesando tu pedido.");
+                        return;
                     }
                 }
 
                 if (!msg.body) return;
+                const m = msg.body.toLowerCase();
 
+                // --- 2. LÓGICA DE ESTADOS DEL BACKEND ---
+
+                // ESTADO: Esperando Dirección y Nombre
+                if (currentStep === 'AWAITING_ADDRESS') {
+                    // Intento simple de validar si hay dirección (mínimo 5 caracteres y no es una confirmación corta)
+                    if (m.length > 8 && (m.includes('calle') || m.includes('cll') || m.includes('cra') || m.includes('carrera') || m.includes('av') || m.includes('#'))) {
+                        db.prepare('UPDATE customers SET address = ? WHERE id = ?').run(msg.body, customer.id);
+                        updateCustomerState(customer.id, 'AWAITING_PAYMENT');
+                        await msg.reply("📍 *¡Perfecto!* Ya guardé tu dirección. ¿Cómo deseas realizar el pago?\n\n1. **Efectivo** 💵\n2. **Transferencia (Nequi)** 💳");
+                        return;
+                    }
+                }
+
+                // ESTADO: Esperando Método de Pago
+                if (currentStep === 'AWAITING_PAYMENT') {
+                    if (m.includes('efectivo') || m === '1') {
+                        const order = createOrderFromState(customer.id, 'Efectivo');
+                        if (order && io) io.emit('new_order', { id: order.orderId, status: 'PENDING' });
+                        await msg.reply("✅ *¡Listo!* Tu pedido en efectivo ha sido registrado. Lo llevaremos lo antes posible. ¡Gracias!");
+                        return;
+                    } else if (m.includes('transferencia') || m.includes('nequi') || m === '2') {
+                        updateCustomerState(customer.id, 'AWAITING_RECEIPT');
+                        const paymentInfo = db.prepare("SELECT value FROM config_bot WHERE key = 'payment_info'").get()?.value || "Por favor transfiere a Nequi: 3207008433";
+                        await msg.reply(paymentInfo);
+                        createOrderFromState(customer.id, 'Transferencia'); // Creamos la orden de una vez
+                        return;
+                    }
+                }
+
+                // --- 3. PROCESAMIENTO CON IA (BROWSING / CHAT / RECOMENDACIONES) ---
                 console.log('🧠 IA: Procesando...');
+
+                // Detectar intención de "Confirmar pedido" para saltar a AWAITING_ADDRESS
+                const intent = classifyIntent(msg.body);
+                if (intent === 'CONFIRM_PRODUCTS' && currentStep === 'BROWSING') {
+                    // Extraer carrito temporal antes de pasar al siguiente paso
+                    // (En un sistema real, la IA ya habría ayudado a armar el cart en current_cart)
+                    // Por ahora, simulamos que lo que tiene en mente es lo que guardaremos.
+                    // Para que sea robusto, la IA debe "notar" los productos. 
+                    // IMPLEMENTACIÓN: Si el usuario confirma, pasamos a pedir datos.
+                    updateCustomerState(customer.id, 'AWAITING_ADDRESS');
+                    await msg.reply("🙌 ¡Excelente elección! Para finalizar, por favor regálame tu **Nombre completo** y **Dirección de entrega**.");
+                    return;
+                }
+
                 let aiResponse = await processMessage(customer, msg.body);
 
                 if (aiResponse) {
-                    // 1. Extraer JSON robustamente (buscando [ORDEN_JSON:...] o *ORDEN_JSON:*)
-                    let jsonContentToParse = null;
-                    const orderMatch = aiResponse.match(/(?:\[|\*)?ORDEN_JSON:?(?:\]|\*)?([\s\S]*?)(?:\]|$)/i);
-
-                    if (orderMatch) {
-                        jsonContentToParse = orderMatch[1];
-                    } else {
-                        // Búsqueda de rescate: a veces Llama olvida el ORDEN_JSON y pone solo el bloque o lo envuelve en markdown
-                        const looseMatch = aiResponse.match(/\{[\s\S]*?"items"[\s\S]*?"total"[\s\S]*?\}/i);
-                        if (looseMatch) {
-                            jsonContentToParse = looseMatch[0];
-                        }
-                    }
-
-                    if (jsonContentToParse) {
-                        try {
-                            // Extraer solo lo que esté entre llaves { }
-                            const jsonMatch = jsonContentToParse.match(/\{[\s\S]*\}/);
-
-                            if (jsonMatch) {
-                                const jsonRaw = jsonMatch[0];
-                                const cleanJson = jsonRaw.replace(/[\u0000-\u001F\u007F-\u009F]/g, " ").trim();
-
-                                console.log('📦 Intentando procesar pedido JSON...');
-                                const orderData = JSON.parse(cleanJson);
-
-                                if (orderData && orderData.items) {
-                                    const result = processOrderJSON(customer.id, orderData);
-                                    if (result && result.orderId && io) {
-                                        console.log(`🚀 Notificando al Panel pedido #${result.orderId}`);
-                                        io.emit('new_order', { id: result.orderId, status: 'PENDING' });
-                                    }
-                                }
-                            }
-                        } catch (jsonErr) {
-                            console.error('❌ Error parseando JSON de orden:', jsonErr.message);
-                        }
-                    }
-
-                    // 2. LIMPIEZA TOTAL: Quitar CUALQUIER mención de ORDEN_JSON y lo que le siga que parezca JSON
-                    aiResponse = aiResponse.replace(/(?:\[|\*)?ORDEN_JSON:?[\s\S]*/gi, '').trim();
-                    // Limpieza ultra-agresiva: Si la IA escupe JSON crudo accidentalmente (ej: "metodo_pago": "efectivo")
-                    aiResponse = aiResponse.replace(/("metodo_pago"|"nombre_cliente"|"product_name"|"direccion"\s*:)[^]*/gi, '').trim();
+                    // Limpieza simplificada (ya no buscamos JSON complejos de la IA)
                     aiResponse = aiResponse.replace(/```json[\s\S]*?```/gi, '').trim();
-                    aiResponse = aiResponse.replace(/\{[\s\S]*?\}/gi, '').trim(); // Elimina cualquier bloque de llaves sobrante
-                    // Limpia brackets o comas sueltas al final resultantes de un JSON roto
-                    aiResponse = aiResponse.replace(/[\}\]\s,]*$/g, '').trim();
+                    aiResponse = aiResponse.replace(/\{[\s\S]*?\}/gi, '').trim();
 
-                    // 3. Enviar respuesta limpia
                     if (aiResponse) {
-                        console.log(`📤 Enviando respuesta (${aiResponse.length} chars)...`);
                         try {
                             await msg.reply(aiResponse);
                         } catch (replyErr) {

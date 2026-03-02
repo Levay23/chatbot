@@ -13,27 +13,28 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODEL_NAME = 'llama3-70b-8192'; // Regresamos al 70B: Mayor cuota de tokens y mejor razonamiento JSON
 
 export const processMessage = async (customer, incomingMessage) => {
-    console.log(`🧠 [AI - Groq 8B] Procesando mensaje de ${customer.phone}: "${incomingMessage}"`);
+    console.log(`🧠 [AI - Groq] Procesando mensaje de ${customer.phone}: "${incomingMessage}"`);
 
     try {
         // 1. Guardar mensaje del usuario en memoria/DB
         saveMessage(customer.id, 'user', incomingMessage);
 
-        // 2. Obtener configuración (saludos, etc.)
-        const configEntries = db.prepare('SELECT key, value FROM config_bot').all();
-        const config = configEntries.reduce((acc, curr) => ({ ...acc, [curr.key]: curr.value }), {});
+        // 2. Obtener contexto enriquecido (Memoria + Perfil + Estado)
+        const context = getAIContext(customer.id);
+        const currentStep = context.state.current_step;
 
         // 3. Clasificar intención y filtrar menú dinámicamente
         const mode = classifyIntent(incomingMessage);
         const filteredMenu = getFilteredMenu(incomingMessage);
 
-        // 4. Obtener contexto enriquecido (Memoria + Perfil)
-        const context = getAIContext(customer.id);
+        // 4. Obtener configuración
+        const configEntries = db.prepare('SELECT key, value FROM config_bot').all();
+        const config = configEntries.reduce((acc, curr) => ({ ...acc, [curr.key]: curr.value }), {});
 
         // 5. Construir System Prompt dinámico
-        const dynamicPrompt = buildSystemPrompt(mode, context.memory, context.profile, filteredMenu, config);
+        const dynamicPrompt = buildSystemPrompt(mode, context, filteredMenu, config);
 
-        // 5. Preparar historial para Groq (Solo los últimos 6 mensajes)
+        // 6. Preparar historial para Groq (Últimos 12 mensajes)
         const messages = [
             { role: "system", content: dynamicPrompt },
             ...context.messages.map(msg => ({
@@ -41,6 +42,9 @@ export const processMessage = async (customer, incomingMessage) => {
                 content: msg.content
             }))
         ];
+
+        // 7. Temperatura según estado
+        const temperature = currentStep === 'BROWSING' ? 0.6 : 0.3;
 
         let aiResponse = "";
         let attempts = 0;
@@ -51,8 +55,8 @@ export const processMessage = async (customer, incomingMessage) => {
                 const response = await axios.post(GROQ_URL, {
                     model: MODEL_NAME,
                     messages: messages,
-                    temperature: 0.6,
-                    max_tokens: 450, // Reducido para evitar limites de Groq TPM (429)
+                    temperature: temperature,
+                    max_tokens: 450,
                     top_p: 1,
                     stream: false
                 }, {
@@ -60,7 +64,7 @@ export const processMessage = async (customer, incomingMessage) => {
                         'Authorization': `Bearer ${GROQ_API_KEY}`,
                         'Content-Type': 'application/json'
                     },
-                    timeout: 10000 // 10 segundos (más rápido)
+                    timeout: 10000
                 });
 
                 aiResponse = response.data.choices[0].message.content;
@@ -74,7 +78,6 @@ export const processMessage = async (customer, incomingMessage) => {
         }
 
         if (aiResponse) {
-            // Guardar respuesta de la IA en memoria/DB
             saveMessage(customer.id, 'assistant', aiResponse);
             return aiResponse;
         }
@@ -82,7 +85,7 @@ export const processMessage = async (customer, incomingMessage) => {
         return "Lo siento, estamos un poco ocupados. Por favor repíteme tu mensaje en un momento.";
 
     } catch (error) {
-        console.error('❌ Error en AI Service (Groq 8B):', error.message);
+        console.error('❌ Error en AI Service:', error.message);
         return "Lo siento, hubo un pequeño error. ¿Puedes intentar de nuevo?";
     }
 };
