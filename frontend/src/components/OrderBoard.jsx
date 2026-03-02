@@ -79,7 +79,7 @@ export function OrderCard({ order, onMove, nextLabel, onDelete, onDetail, onRece
                         className="relative group/receipt overflow-hidden rounded-xl border-2 border-orange-500/40 cursor-zoom-in hover:border-orange-400 transition-all shadow-lg"
                     >
                         <img
-                            src={order.receipt}
+                            src={order.receipt.startsWith('http') ? order.receipt : `http://localhost:3000${order.receipt}`}
                             alt="Comprobante"
                             className="w-full max-h-32 object-cover transition-transform duration-500 group-hover/receipt:scale-110"
                         />

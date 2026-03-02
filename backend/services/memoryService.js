@@ -29,7 +29,13 @@ export const saveMessage = (customerId, role, content) => {
 export const summarizeConversation = async (customerId) => {
     console.log(`📝 Generando resumen de memoria para cliente ID: ${customerId}...`);
     try {
-        const history = db.prepare('SELECT role, message FROM conversations WHERE customer_id = ? ORDER BY timestamp ASC').all(customerId);
+        let history = db.prepare('SELECT role, message FROM conversations WHERE customer_id = ? ORDER BY timestamp ASC').all(customerId);
+
+        // RECORTAR HISTORIAL: Solo enviar los últimos 50 mensajes para evitar error 413 Payload Too Large
+        if (history.length > 50) {
+            history = history.slice(-50);
+        }
+
         const existingSummary = db.prepare('SELECT summary_text FROM memory_summary WHERE customer_id = ?').get(customerId);
 
         const conversationText = history.map(m => `${m.role}: ${m.message}`).join('\n');

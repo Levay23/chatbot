@@ -7,6 +7,10 @@ import { createOrderFromState } from './orderService.js';
 import { classifyIntent } from './salesEngine.js';
 import { exec } from 'child_process';
 import db from '../database/db.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let clientInstance = null;
 let isWhatsAppReady = false;
@@ -79,15 +83,31 @@ export const startWhatsApp = async () => {
 
                 // --- 1. MANEJO DE COMPROBANTES (AWAITING_RECEIPT) ---
                 if (msg.hasMedia && currentStep === 'AWAITING_RECEIPT') {
-                    const media = await msg.downloadMedia();
-                    if (media) {
-                        const receiptData = `data:${media.mimetype};base64,${media.data}`;
-                        const lastOrderId = db.prepare('SELECT id FROM orders WHERE customer_id = ? ORDER BY created_at DESC LIMIT 1').get(customer.id).id;
-                        db.prepare('UPDATE orders SET receipt = ? WHERE id = ?').run(receiptData, lastOrderId);
-                        updateCustomerState(customer.id, 'COMPLETED');
+                    try {
+                        const media = await msg.downloadMedia();
+                        if (media) {
+                            const lastOrder = db.prepare('SELECT id FROM orders WHERE customer_id = ? ORDER BY created_at DESC LIMIT 1').get(customer.id);
+                            if (!lastOrder) return;
 
-                        if (io) io.emit('order_updated', { id: lastOrderId, hasReceipt: true });
-                        await msg.reply("✅ *¡Recibido!* Muchas gracias por tu pago. Ya estamos procesando tu pedido.");
+                            const extension = media.mimetype.split('/')[1]?.split(';')[0] || 'jpg';
+                            const fileName = `receipt_${lastOrder.id}_${Date.now()}.${extension}`;
+                            const publicPath = path.join(__dirname, '../public/receipts', fileName);
+                            const dbUrl = `/public/receipts/${fileName}`;
+
+                            // Guardar archivo físico
+                            fs.writeFileSync(publicPath, Buffer.from(media.data, 'base64'));
+
+                            // Actualizar DB con la URL en vez del Base64 pesado
+                            db.prepare('UPDATE orders SET receipt = ? WHERE id = ?').run(dbUrl, lastOrder.id);
+                            updateCustomerState(customer.id, 'COMPLETED');
+
+                            if (io) io.emit('order_updated', { id: lastOrder.id, hasReceipt: true, receiptUrl: dbUrl });
+                            await msg.reply("✅ *¡Recibido!* Muchas gracias por tu pago. Ya estamos procesando tu pedido.");
+                            return;
+                        }
+                    } catch (mediaErr) {
+                        console.error('❌ Error procesando comprobante:', mediaErr.message);
+                        await msg.reply("⚠️ Hubo un problema al procesar tu imagen. Por favor, intenta enviarla de nuevo.");
                         return;
                     }
                 }
