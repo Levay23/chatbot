@@ -11,6 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_API_KEY_2 = process.env.GROQ_API_KEY_2;
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODEL_NAME = 'llama-3.3-70b-versatile'; // Restaurado a 3.3
 
@@ -48,43 +49,42 @@ export const processMessage = async (customer, incomingMessage) => {
         // 7. Temperatura fija más baja para mayor estabilidad y menos repetición
         const temperature = 0.4;
 
+        // Rotación automática de API Keys al detectar 429
+        const apiKeys = [GROQ_API_KEY, GROQ_API_KEY_2].filter(Boolean);
         let aiResponse = "";
-        let attempts = 0;
-        const maxAttempts = 3;
 
-        while (attempts < maxAttempts) {
+        for (const apiKey of apiKeys) {
             try {
+                console.log(`🔑 Usando API Key ${apiKeys.indexOf(apiKey) + 1}...`);
                 const response = await axios.post(GROQ_URL, {
                     model: MODEL_NAME,
                     messages: messages,
-                    temperature: temperature,
+                    temperature: 0.4,
                     max_tokens: 350,
                     top_p: 1,
                     stream: false
                 }, {
-                    headers: {
-                        'Authorization': `Bearer ${GROQ_API_KEY}`,
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
                     timeout: 10000
                 });
-
                 aiResponse = response.data.choices[0].message.content;
-                break;
+                break; // Éxito, salir del loop
             } catch (error) {
-                attempts++;
-                console.error(`⚠️ Intento ${attempts} fallido:`, error.response?.data || error.message);
-                if (attempts === maxAttempts) throw error;
-                await new Promise(resolve => setTimeout(resolve, attempts * 1000));
+                if (error.response?.status === 429) {
+                    console.warn(`⚠️ Key ${apiKeys.indexOf(apiKey) + 1} agotada. Rotando a la siguiente...`);
+                    continue;
+                }
+                throw error;
             }
         }
 
-        if (aiResponse) {
-            saveMessage(customer.id, 'assistant', aiResponse);
-            return aiResponse;
+        if (!aiResponse) {
+            console.error('❌ Todas las API Keys están agotadas.');
+            return "Estoy un poco ocupado en este momento 😅. Escríbeme en unos minutos y te atiendo rápido. ¡Gracias por tu paciencia!";
         }
 
-        return "Lo siento, estamos un poco ocupados. Por favor repíteme tu mensaje en un momento.";
+        saveMessage(customer.id, 'assistant', aiResponse);
+        return aiResponse;
 
     } catch (error) {
         console.error('❌ Error en AI Service:', error.message);
