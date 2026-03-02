@@ -23,7 +23,7 @@ router.post('/test-send', verifyToken, async (req, res) => {
         const client = getClient();
         if (!client) return res.status(500).json({ error: 'Client not ready' });
 
-        await client.sendText(to, message);
+        await client.sendMessage(to, message);
         res.json({ success: true, message: 'Test message sent' });
     } catch (err) {
         res.status(500).json({ error: err.message });

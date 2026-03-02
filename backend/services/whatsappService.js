@@ -1,8 +1,9 @@
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode-terminal';
-import { getOrCreateCustomer, createOrder } from './memoryService.js';
+import { getOrCreateCustomer } from './memoryService.js';
 import { processMessage } from './aiService.js';
+import { processOrderJSON } from './orderService.js';
 import { exec } from 'child_process';
 import db from '../database/db.js';
 
@@ -57,7 +58,7 @@ export const startWhatsApp = async () => {
 
                 // --- MANEJO DE COMPROBANTES (MULTIMEDIA) ---
                 if (msg.hasMedia) {
-                    console.log('📸 Multimedia detectada. Verificando si es un comprobante...');
+                    // Procesamiento silencioso de comprobantes (solicitado por el usuario)
                     const lastOrder = db.prepare(`
                         SELECT id FROM orders 
                         WHERE customer_id = ? AND payment_method = 'Transferencia' AND status = 'PENDING'
@@ -78,7 +79,7 @@ export const startWhatsApp = async () => {
                                     io.emit('order_updated', { id: lastOrder.id, hasReceipt: true });
                                 }
 
-                                return msg.reply('✅ *¡Recibido!* Hemos recibido tu comprobante. En un momento un asesor lo verificará para procesar tu pedido. ¡Gracias!');
+                                return; // Proceso silencioso, el usuario verifica en el panel
                             }
                         } catch (mediaErr) {
                             console.error('❌ Error descargando multimedia:', mediaErr.message);
@@ -92,62 +93,63 @@ export const startWhatsApp = async () => {
                 let aiResponse = await processMessage(customer, msg.body);
 
                 if (aiResponse) {
-                    // --- DETECTAR Y PROCESAR PEDIDO JSON ---
-                    // USAMOS GREEDY (.*) para asegurar que tome todo hasta el último ']'
-                    const orderMatch = aiResponse.match(/\[ORDEN_JSON:(.*)\]/s);
+                    // 1. Extraer JSON robustamente (buscando [ORDEN_JSON:...] o *ORDEN_JSON:*)
+                    let jsonContentToParse = null;
+                    const orderMatch = aiResponse.match(/(?:\[|\*)?ORDEN_JSON:?(?:\]|\*)?([\s\S]*?)(?:\]|$)/i);
 
                     if (orderMatch) {
+                        jsonContentToParse = orderMatch[1];
+                    } else {
+                        // Búsqueda de rescate: a veces Llama olvida el ORDEN_JSON y pone solo el bloque o lo envuelve en markdown
+                        const looseMatch = aiResponse.match(/\{[\s\S]*?"items"[\s\S]*?"total"[\s\S]*?\}/i);
+                        if (looseMatch) {
+                            jsonContentToParse = looseMatch[0];
+                        }
+                    }
+
+                    if (jsonContentToParse) {
                         try {
-                            // Extraer solo la parte del JSON (entre llaves)
-                            let jsonRaw = orderMatch[1].trim();
+                            // Extraer solo lo que esté entre llaves { }
+                            const jsonMatch = jsonContentToParse.match(/\{[\s\S]*\}/);
 
-                            // Limpiar caracteres de control y saltos de línea que rompen JSON.parse
-                            let cleanJson = jsonRaw
-                                .replace(/[\u0000-\u001F\u007F-\u009F]/g, " ") // Elimina caracteres de control
-                                .trim();
+                            if (jsonMatch) {
+                                const jsonRaw = jsonMatch[0];
+                                const cleanJson = jsonRaw.replace(/[\u0000-\u001F\u007F-\u009F]/g, " ").trim();
 
-                            console.log('📦 Intentando parsear JSON limpiado:', cleanJson);
-                            const orderData = JSON.parse(cleanJson);
-                            console.log('✅ PEDIDO PARSEADO CORRECTAMENTE');
+                                console.log('📦 Intentando procesar pedido JSON...');
+                                const orderData = JSON.parse(cleanJson);
 
-                            // 1. Actualizar dirección si viene en el JSON
-                            if (orderData.direccion) {
-                                db.prepare('UPDATE customers SET address = ? WHERE id = ?').run(orderData.direccion, customer.id);
-                                console.log('📍 Dirección actualizada.');
+                                if (orderData && orderData.items) {
+                                    const result = processOrderJSON(customer.id, orderData);
+                                    if (result && result.orderId && io) {
+                                        console.log(`🚀 Notificando al Panel pedido #${result.orderId}`);
+                                        io.emit('new_order', { id: result.orderId, status: 'PENDING' });
+                                    }
+                                }
                             }
-
-                            // 2. Crear orden en la DB
-                            // Mapear items a formato DB si es necesario
-                            const productsForOrder = orderData.items.map(i => ({
-                                name: i.name,
-                                quantity: i.quantity,
-                                price: i.price
-                            }));
-
-                            const orderId = createOrder(customer.phone, productsForOrder, orderData.total, orderData.metodo_pago || 'Efectivo');
-
-                            if (orderId && io) {
-                                console.log(`🚀 Notificando al Panel pedido #${orderId}`);
-                                io.emit('new_order', { id: orderId, status: 'PENDING' });
-                            }
-
-                            // 3. LIMPIAR EL MENSAJE (Quitar el JSON para que el cliente no lo vea)
-                            aiResponse = aiResponse.replace(/\[ORDEN_JSON:.*?\]/gs, '').trim();
-
                         } catch (jsonErr) {
                             console.error('❌ Error parseando JSON de orden:', jsonErr.message);
                         }
                     }
 
-                    // Enviar respuesta limpia
-                    console.log(`📤 Enviando respuesta (${aiResponse.length} chars)...`);
-                    try {
-                        await msg.reply(aiResponse);
-                        console.log('✅ Enviado con éxito.');
-                    } catch (replyErr) {
-                        const chat = await msg.getChat();
-                        await chat.sendMessage(aiResponse);
-                        console.log('✅ Enviado vía chat.sendMessage (fallback).');
+                    // 2. LIMPIEZA TOTAL: Quitar CUALQUIER mención de ORDEN_JSON y lo que le siga que parezca JSON
+                    aiResponse = aiResponse.replace(/(?:\[|\*)?ORDEN_JSON:?[\s\S]*/gi, '').trim();
+                    // Limpieza ultra-agresiva: Si la IA escupe JSON crudo accidentalmente (ej: "metodo_pago": "efectivo")
+                    aiResponse = aiResponse.replace(/("metodo_pago"|"nombre_cliente"|"product_name"|"direccion"\s*:)[^]*/gi, '').trim();
+                    aiResponse = aiResponse.replace(/```json[\s\S]*?```/gi, '').trim();
+                    aiResponse = aiResponse.replace(/\{[\s\S]*?\}/gi, '').trim(); // Elimina cualquier bloque de llaves sobrante
+                    // Limpia brackets o comas sueltas al final resultantes de un JSON roto
+                    aiResponse = aiResponse.replace(/[\}\]\s,]*$/g, '').trim();
+
+                    // 3. Enviar respuesta limpia
+                    if (aiResponse) {
+                        console.log(`📤 Enviando respuesta (${aiResponse.length} chars)...`);
+                        try {
+                            await msg.reply(aiResponse);
+                        } catch (replyErr) {
+                            const chat = await msg.getChat();
+                            await chat.sendMessage(aiResponse);
+                        }
                     }
                 }
             } catch (err) {

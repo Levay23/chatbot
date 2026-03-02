@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { startWhatsApp, setIO as setWhatsAppIO } from './services/whatsappService.js';
+import db from './database/db.js';
 
 import authRoutes from './routes/auth.js';
 import customerRoutes from './routes/customers.js';
