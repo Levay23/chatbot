@@ -56,6 +56,16 @@ export function OrderCard({ order, onMove, nextLabel, onDelete, onDetail, onRece
                 </div>
             </div>
 
+            {order.notes && (
+                <div className="pl-2 mt-1">
+                    <p className="text-[10px] text-amber-500 font-bold uppercase tracking-widest mb-2">Instrucciones de Preparación:</p>
+                    <div className="flex items-start gap-2 text-amber-200/90 bg-amber-500/10 p-2.5 rounded-xl border border-amber-500/20 italic shadow-inner">
+                        <span className="text-xs">📝</span>
+                        <p className="text-xs leading-relaxed">{order.notes}</p>
+                    </div>
+                </div>
+            )}
+
             <div className="pl-2 mt-1">
                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-2">Pedido:</p>
                 <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">

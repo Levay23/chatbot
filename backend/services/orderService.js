@@ -4,7 +4,7 @@ import { updateCustomerProfile, updateCustomerState } from './memoryService.js';
 /**
  * Crea una orden basada en el estado actual guardado en la DB (current_cart)
  */
-export const createOrderFromState = (customerId, paymentMethod, name = null, address = null) => {
+export const createOrderFromState = (customerId, paymentMethod, name = null, address = null, notes = null) => {
     console.log(`📦 Creando pedido desde estado para cliente ${customerId}...`);
 
     try {
@@ -21,18 +21,27 @@ export const createOrderFromState = (customerId, paymentMethod, name = null, add
         // 1. Validar productos y calcular total real
         let totalReal = 0;
         const validatedItems = [];
+        const allProducts = db.prepare('SELECT id, name, price, active FROM products WHERE active = 1').all();
 
         for (const item of cart.items) {
-            const product = db.prepare('SELECT id, name, price, active FROM products WHERE name LIKE ?').get(`%${item.product_name || item.name}%`);
+            const aiName = (item.product_name || item.name || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-            if (product && product.active) {
+            // Buscar la mejor coincidencia
+            let matchedProduct = allProducts.find(p => {
+                const dbName = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                return dbName.includes(aiName) || aiName.includes(dbName) ||
+                    dbName.split('(')[0].trim().includes(aiName) ||
+                    aiName.includes(dbName.split('(')[0].trim());
+            });
+
+            if (matchedProduct) {
                 const qty = item.quantity || 1;
-                totalReal += (product.price * qty);
+                totalReal += (matchedProduct.price * qty);
                 validatedItems.push({
-                    product_id: product.id,
-                    name: product.name,
+                    product_id: matchedProduct.id,
+                    name: matchedProduct.name,
                     quantity: qty,
-                    price: product.price
+                    price: matchedProduct.price
                 });
             }
         }
@@ -43,8 +52,8 @@ export const createOrderFromState = (customerId, paymentMethod, name = null, add
         const finalName = name || customer.name || 'Cliente';
         const finalAddress = address || customer.address || 'Recoge en local';
 
-        const info = db.prepare('INSERT INTO orders (customer_id, total, payment_method) VALUES (?, ?, ?)')
-            .run(customerId, totalReal, paymentMethod);
+        const info = db.prepare('INSERT INTO orders (customer_id, total, payment_method, notes) VALUES (?, ?, ?, ?)')
+            .run(customerId, totalReal, paymentMethod, notes);
         const orderId = info.lastInsertRowid;
 
         // 3. Insertar items

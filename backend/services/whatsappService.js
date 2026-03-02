@@ -87,7 +87,10 @@ export const startWhatsApp = async () => {
                         const media = await msg.downloadMedia();
                         if (media) {
                             const lastOrder = db.prepare('SELECT id FROM orders WHERE customer_id = ? ORDER BY created_at DESC LIMIT 1').get(customer.id);
-                            if (!lastOrder) return;
+                            if (!lastOrder) {
+                                await msg.reply("😅 Disculpa, no encontré tu pedido pendiente en el sistema. ¿Podrías confirmarme qué pediste para verificar?");
+                                return;
+                            }
 
                             const extension = media.mimetype.split('/')[1]?.split(';')[0] || 'jpg';
                             const fileName = `receipt_${lastOrder.id}_${Date.now()}.${extension}`;
@@ -110,6 +113,9 @@ export const startWhatsApp = async () => {
                         await msg.reply("⚠️ Hubo un problema al procesar tu imagen. Por favor, intenta enviarla de nuevo.");
                         return;
                     }
+                } else if (msg.hasMedia && currentStep === 'AWAITING_RECEIPT') {
+                    await msg.reply("😅 Disculpa, no encontré tu pedido pendiente en el sistema. ¿Podrías confirmarme qué pediste para verificar?");
+                    return;
                 }
 
                 if (!msg.body) return;
@@ -131,15 +137,22 @@ export const startWhatsApp = async () => {
                 // ESTADO: Esperando Método de Pago
                 if (currentStep === 'AWAITING_PAYMENT') {
                     if (m.includes('efectivo') || m === '1') {
-                        const order = createOrderFromState(customer.id, 'Efectivo');
+                        const currentNotes = db.prepare('SELECT notes FROM customers WHERE id = ?').get(customer.id)?.notes || null;
+                        const order = createOrderFromState(customer.id, 'Efectivo', null, null, currentNotes);
                         if (order && io) io.emit('new_order', { id: order.orderId, status: 'PENDING' });
                         await msg.reply("✅ *¡Listo!* Tu pedido en efectivo ha sido registrado. Lo llevaremos lo antes posible. ¡Gracias!");
                         return;
                     } else if (m.includes('transferencia') || m.includes('nequi') || m === '2') {
+                        const currentNotes = db.prepare('SELECT notes FROM customers WHERE id = ?').get(customer.id)?.notes || null;
+                        const order = createOrderFromState(customer.id, 'Transferencia', null, null, currentNotes);
+                        if (!order) {
+                            await msg.reply("😅 Amigo, tuve un problemita técnico anotando tu pedido. ¿Me confirmas de nuevo qué deseas pedir para asegurarme de que todo esté perfecto? 🙏");
+                            updateCustomerState(customer.id, 'BROWSING');
+                            return;
+                        }
                         updateCustomerState(customer.id, 'AWAITING_RECEIPT');
                         const paymentInfo = db.prepare("SELECT value FROM config_bot WHERE key = 'payment_info'").get()?.value || "Por favor transfiere a Nequi: 3207008433";
                         await msg.reply(paymentInfo);
-                        createOrderFromState(customer.id, 'Transferencia'); // Creamos la orden de una vez
                         return;
                     }
                 }
@@ -178,6 +191,14 @@ export const startWhatsApp = async () => {
                         }
                     }
 
+                    // --- EXTRACCIÓN DE NOTAS (<notes>) ---
+                    const notesMatch = aiResponse.match(/<notes>([\s\S]*?)<\/notes>/i);
+                    if (notesMatch) {
+                        const notes = notesMatch[1].trim();
+                        console.log(`📝 Notas extraídas para ${customer.phone}:`, notes);
+                        db.prepare('UPDATE customers SET notes = ? WHERE id = ?').run(notes, customer.id);
+                    }
+
                     // --- EXTRACCIÓN DE ESTADO (<state>) ---
                     const stateMatch = aiResponse.match(/<state>([\s\S]*?)<\/state>/i);
                     if (stateMatch) {
@@ -192,14 +213,27 @@ export const startWhatsApp = async () => {
                     if (orderMatch) {
                         const paymentMethod = orderMatch[1].trim();
                         console.log(`📦 IA solicitó creación de orden (${paymentMethod}) para ${customer.phone}`);
-                        const order = createOrderFromState(customer.id, paymentMethod);
+
+                        // Obtener notas actuales del cliente antes de crear la orden
+                        const currentNotes = db.prepare('SELECT notes FROM customers WHERE id = ?').get(customer.id)?.notes || null;
+
+                        const order = createOrderFromState(customer.id, paymentMethod, null, null, currentNotes);
                         if (order && io) {
                             io.emit('new_order', { id: order.orderId, status: 'PENDING' });
+                            // Limpiar notas del cliente después de crear la orden
+                            db.prepare('UPDATE customers SET notes = NULL WHERE id = ?').run(customer.id);
+                        } else {
+                            console.error(`❌ Falló la creación de orden para ${customer.phone}. Notificando error.`);
+                            await msg.reply("😅 Amigo, tuve un problemita técnico anotando tu pedido exacto. ¿Me confirmas de nuevo los platos para asegurarme de que todo esté perfecto? 🙏");
+                            // Revertir estado si la IA lo cambió pero la orden falló
+                            updateCustomerState(customer.id, 'BROWSING');
+                            return;
                         }
                     }
 
                     // Limpieza: Quitar etiquetas auxiliares antes de enviar al usuario
                     aiResponse = aiResponse.replace(/<cart>[\s\S]*?<\/cart>/gi, '').trim();
+                    aiResponse = aiResponse.replace(/<notes>[\s\S]*?<\/notes>/gi, '').trim();
                     aiResponse = aiResponse.replace(/<state>[\s\S]*?<\/state>/gi, '').trim();
                     aiResponse = aiResponse.replace(/<create_order>[\s\S]*?<\/create_order>/gi, '').trim();
                     aiResponse = aiResponse.replace(/```json[\s\S]*?```/gi, '').trim();
