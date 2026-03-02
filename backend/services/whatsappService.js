@@ -123,39 +123,44 @@ export const startWhatsApp = async () => {
 
                 // --- 2. LÓGICA DE ESTADOS DEL BACKEND ---
 
-                // ESTADO: Esperando Dirección y Nombre
+                // ESTADO: Esperando Nombre y Dirección
                 if (currentStep === 'AWAITING_ADDRESS') {
-                    // Intento simple de validar si hay dirección (mínimo 5 caracteres y no es una confirmación corta)
-                    if (m.length > 8 && (m.includes('calle') || m.includes('cll') || m.includes('cra') || m.includes('carrera') || m.includes('av') || m.includes('#'))) {
-                        db.prepare('UPDATE customers SET address = ? WHERE id = ?').run(msg.body, customer.id);
-                        updateCustomerState(customer.id, 'AWAITING_PAYMENT');
-                        await msg.reply("📍 *¡Perfecto!* Ya guardé tu dirección. ¿Cómo deseas realizar el pago?\n\n1. **Efectivo** 💵\n2. **Transferencia (Nequi)** 💳");
-                        return;
+                    // Aceptar cualquier respuesta mayor a 5 chars como dirección válida
+                    // (no limitamos a "calle", "cra", etc. porque pueden ser descripciones)
+                    if (msg.body.trim().length > 5) {
+                        // Si el cliente dio datos, la IA los habrá capturado en <data>
+                        // Guardar también directamente aquí como fallback
+                        const existing = db.prepare('SELECT address FROM customers WHERE id = ?').get(customer.id);
+                        if (!existing?.address || existing.address.length < 5) {
+                            db.prepare('UPDATE customers SET address = ? WHERE id = ?').run(msg.body, customer.id);
+                        }
+                        // Dejar que la IA responda, ella detectará y usará <state>AWAITING_PAYMENT</state>
                     }
                 }
 
                 // ESTADO: Esperando Método de Pago
                 if (currentStep === 'AWAITING_PAYMENT') {
-                    if (m.includes('efectivo') || m === '1') {
+                    if (m.includes('efectivo') || m.trim() === '1') {
                         const currentNotes = db.prepare('SELECT notes FROM customers WHERE id = ?').get(customer.id)?.notes || null;
                         const order = createOrderFromState(customer.id, 'Efectivo', null, null, currentNotes);
                         if (order && io) {
                             io.emit('new_order', { id: order.orderId, status: 'PENDING' });
                             updateCustomerState(customer.id, 'COMPLETED');
                         }
-                        await msg.reply("✅ *¡Listo!* Tu pedido en efectivo ha sido registrado. Lo llevaremos lo antes posible. ¡Gracias!");
+                        await msg.reply("✅ *¡Pedido registrado!* Te llevaremos tu pedido lo antes posible. Gracias 🙌");
                         return;
-                    } else if (m.includes('transferencia') || m.includes('nequi') || m === '2') {
+                    } else if (m.includes('transferencia') || m.includes('nequi') || m.includes('transfer') || m.trim() === '2') {
                         const currentNotes = db.prepare('SELECT notes FROM customers WHERE id = ?').get(customer.id)?.notes || null;
                         const order = createOrderFromState(customer.id, 'Transferencia', null, null, currentNotes);
                         if (!order) {
-                            await msg.reply("😅 Amigo, tuve un problemita técnico anotando tu pedido. ¿Me confirmas de nuevo qué deseas pedir para asegurarme de que todo esté perfecto? 🙏");
+                            await msg.reply("😅 Tuve un problemita técnico. ¿Me confirmas tu pedido de nuevo?");
                             updateCustomerState(customer.id, 'BROWSING');
                             return;
                         }
                         updateCustomerState(customer.id, 'AWAITING_RECEIPT');
-                        const paymentInfo = db.prepare("SELECT value FROM config_bot WHERE key = 'payment_info'").get()?.value || "Por favor transfiere a Nequi: 3207008433";
-                        await msg.reply(paymentInfo);
+                        const paymentInfoRow = db.prepare("SELECT value FROM config_bot WHERE key = 'payment_info'").get();
+                        const paymentText = paymentInfoRow?.value || "Nequi: 3207008433 - Luis Castillo";
+                        await msg.reply(`💳 *Datos para tu transferencia:*\n\n${paymentText}\n\nEnvíame la foto del comprobante cuando hayas pagado. ✅`);
                         return;
                     }
                 }
