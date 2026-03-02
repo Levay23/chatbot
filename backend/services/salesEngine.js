@@ -23,7 +23,7 @@ export const getFilteredMenu = (userMessage) => {
     if (message.includes('arroz')) query += " AND (category LIKE '%Arroz%' OR name LIKE '%Arroz%')";
     else if (message.includes('pollo')) query += " AND (name LIKE '%Pollo%' OR category LIKE '%Pollo%')";
     else if (message.includes('bebida') || message.includes('jugo')) query += " AND (category LIKE '%Bebida%' OR category LIKE '%Gaseosa%')";
-    else query += " LIMIT 15";
+    else query += " LIMIT 10";
 
     const products = db.prepare(query).all();
     if (products.length === 0) return "No hay productos disponibles en esta categoría.";

@@ -36,10 +36,10 @@ export const processMessage = async (customer, incomingMessage) => {
         // 5. Construir System Prompt dinámico
         const dynamicPrompt = buildSystemPrompt(mode, context, filteredMenu, config);
 
-        // 6. Preparar historial para Groq (Últimos 12 mensajes)
+        // 6. Preparar historial para Groq (Últimos 8 mensajes para ahorrar tokens)
         const messages = [
             { role: "system", content: dynamicPrompt },
-            ...context.messages.map(msg => ({
+            ...context.messages.slice(-8).map(msg => ({
                 role: msg.role === 'model' ? 'assistant' : msg.role,
                 content: msg.content
             }))
@@ -58,7 +58,7 @@ export const processMessage = async (customer, incomingMessage) => {
                     model: MODEL_NAME,
                     messages: messages,
                     temperature: temperature,
-                    max_tokens: 450,
+                    max_tokens: 350,
                     top_p: 1,
                     stream: false
                 }, {

@@ -80,11 +80,11 @@ export const summarizeConversation = async (customerId) => {
  * Obtiene el contexto optimizado para la IA
  */
 export const getAIContext = (customerId) => {
-    // 1. Obtener los últimos 12 mensajes (Aumentado de 6 a 12)
+    // 1. Obtener los últimos 8 mensajes (Balance entre contexto y tokens)
     const lastMessages = db.prepare(`
         SELECT role, message as content FROM conversations 
         WHERE customer_id = ? 
-        ORDER BY timestamp DESC LIMIT 12
+        ORDER BY timestamp DESC LIMIT 8
     `).all(customerId).reverse();
 
     // 2. Obtener resumen de memoria
