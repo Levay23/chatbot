@@ -21,6 +21,9 @@ export const setIO = (socketIo) => {
     console.log('🔌 Socket.io vinculado a WhatsAppService');
 };
 
+export const getWhatsAppClient = () => clientInstance;
+export const isWhatsAppConnected = () => isWhatsAppReady;
+
 export const startWhatsApp = async () => {
     try {
         console.log('--- INICIANDO BOT (whatsapp-web.js) ---');

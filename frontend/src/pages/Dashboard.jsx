@@ -40,6 +40,13 @@ export default function Dashboard({ socket }) {
     const [localActivos, setLocalActivos] = useState({});
     const [isSavingMenu, setIsSavingMenu] = useState(false);
 
+    // Clientes
+    const [clientes, setClientes] = useState([]);
+    const [selectedClients, setSelectedClients] = useState([]);
+    const [broadcastMsg, setBroadcastMsg] = useState('');
+    const [isSending, setIsSending] = useState(false);
+    const [broadcastResult, setBroadcastResult] = useState(null);
+
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
@@ -53,15 +60,17 @@ export default function Dashboard({ socket }) {
                 }
             };
 
-            const [ordersData, productsData, configData] = await Promise.all([
+            const [ordersData, productsData, configData, clientsData] = await Promise.all([
                 fetchSafe('/orders'),
                 fetchSafe('/products'),
-                fetchSafe('/config')
+                fetchSafe('/config'),
+                fetchSafe('/customers')
             ]);
 
             setOrders(ordersData);
             setProductos(productsData);
             setConfigBot(configData);
+            setClientes(clientsData);
 
             const initialActivos = {};
             productsData.forEach(p => initialActivos[p.id] = !!p.active);
@@ -468,14 +477,128 @@ export default function Dashboard({ socket }) {
         </div>
     );
 
+    const toggleClientSelect = (id) => {
+        setSelectedClients(prev =>
+            prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+        );
+    };
+
+    const selectAllClients = () => {
+        if (selectedClients.length === clientes.length) setSelectedClients([]);
+        else setSelectedClients(clientes.map(c => c.id));
+    };
+
+    const sendBroadcast = async () => {
+        if (!broadcastMsg.trim() || selectedClients.length === 0) return;
+        setIsSending(true);
+        setBroadcastResult(null);
+        try {
+            const res = await api.post('/customers/broadcast', { ids: selectedClients, message: broadcastMsg });
+            setBroadcastResult(res.data);
+            setBroadcastMsg('');
+            setSelectedClients([]);
+        } catch (err) {
+            setBroadcastResult({ error: err.response?.data?.error || 'Error al enviar' });
+        } finally {
+            setIsSending(false);
+        }
+    };
+
     const renderClientes = () => (
-        <div className="bg-slate-800/40 rounded-[3rem] border border-slate-700/50 p-16 w-full max-w-5xl text-center space-y-6">
-            <div className="mx-auto w-24 h-24 bg-slate-800 rounded-[2rem] flex items-center justify-center border border-slate-700 shadow-2xl">
-                <Users size={48} className="text-slate-600" />
+        <div className="w-full max-w-6xl space-y-6">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <h2 className="text-2xl font-black text-white uppercase tracking-tight">Clientes</h2>
+                    <p className="text-slate-500 text-sm mt-1">{clientes.length} contactos registrados</p>
+                </div>
             </div>
-            <div>
-                <h2 className="text-3xl font-black text-white uppercase tracking-tight mb-3">Módulo de Fidelización</h2>
-                <p className="text-slate-500 font-bold uppercase tracking-widest text-xs max-w-sm mx-auto leading-relaxed">Esta sección está siendo migrada a un sistema de perfiles inteligentes. Por ahora puedes ver los clientes en los pedidos.</p>
+
+            {/* Broadcast composer */}
+            <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-5 space-y-3">
+                <p className="text-xs font-bold text-emerald-400 uppercase tracking-widest">📢 Enviar mensaje por WhatsApp</p>
+                <textarea
+                    value={broadcastMsg}
+                    onChange={e => setBroadcastMsg(e.target.value)}
+                    placeholder={selectedClients.length === 0 ? 'Selecciona clientes en la tabla y escribe tu mensaje aquí...' : `Mensaje para ${selectedClients.length} cliente(s) seleccionado(s)...`}
+                    rows={3}
+                    className="w-full bg-slate-900/60 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm resize-none focus:outline-none focus:border-emerald-500 placeholder-slate-600"
+                />
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={sendBroadcast}
+                        disabled={isSending || !broadcastMsg.trim() || selectedClients.length === 0}
+                        className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 disabled:cursor-not-allowed text-black font-bold text-sm transition-all flex items-center gap-2"
+                    >
+                        {isSending ? '⏳ Enviando...' : `📩 Enviar a ${selectedClients.length || 0} cliente(s)`}
+                    </button>
+                    {selectedClients.length > 0 && (
+                        <button onClick={() => setSelectedClients([])} className="text-slate-500 hover:text-white text-xs underline">Deseleccionar todos</button>
+                    )}
+                </div>
+                {broadcastResult && (
+                    <div className={`rounded-xl px-4 py-2 text-sm font-medium ${broadcastResult.error ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                        {broadcastResult.error
+                            ? `❌ Error: ${broadcastResult.error}`
+                            : `✅ Enviados: ${broadcastResult.sent} | Fallaron: ${broadcastResult.failed}`
+                        }
+                    </div>
+                )}
+            </div>
+
+            {/* Customers table */}
+            <div className="bg-slate-800/30 border border-slate-700/40 rounded-2xl overflow-hidden">
+                <table className="w-full text-sm">
+                    <thead>
+                        <tr className="border-b border-slate-700/50">
+                            <th className="p-4 text-left w-10">
+                                <input type="checkbox" checked={selectedClients.length === clientes.length && clientes.length > 0}
+                                    onChange={selectAllClients} className="w-4 h-4 accent-emerald-500 cursor-pointer" />
+                            </th>
+                            <th className="p-4 text-left text-slate-400 font-semibold">Cliente</th>
+                            <th className="p-4 text-left text-slate-400 font-semibold">Teléfono</th>
+                            <th className="p-4 text-left text-slate-400 font-semibold">Dirección</th>
+                            <th className="p-4 text-center text-slate-400 font-semibold">Pedidos</th>
+                            <th className="p-4 text-right text-slate-400 font-semibold">Total gastado</th>
+                            <th className="p-4 text-right text-slate-400 font-semibold">Último pedido</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {clientes.length === 0 ? (
+                            <tr>
+                                <td colSpan={7} className="text-center py-16 text-slate-600">No hay clientes registrados aún.</td>
+                            </tr>
+                        ) : clientes.map(c => (
+                            <tr key={c.id}
+                                onClick={() => toggleClientSelect(c.id)}
+                                className={`border-b border-slate-700/30 cursor-pointer transition-colors ${selectedClients.includes(c.id) ? 'bg-emerald-500/10 border-emerald-500/20' : 'hover:bg-slate-700/20'
+                                    }`}
+                            >
+                                <td className="p-4">
+                                    <input type="checkbox" checked={selectedClients.includes(c.id)}
+                                        onChange={() => toggleClientSelect(c.id)}
+                                        onClick={e => e.stopPropagation()}
+                                        className="w-4 h-4 accent-emerald-500" />
+                                </td>
+                                <td className="p-4">
+                                    <span className="font-semibold text-white">{c.name || <span className="text-slate-500 italic">Sin nombre</span>}</span>
+                                </td>
+                                <td className="p-4 text-slate-400 font-mono text-xs">{c.phone?.replace('@c.us', '')}</td>
+                                <td className="p-4 text-slate-400 max-w-xs truncate">{c.address || <span className="text-slate-600 italic">—</span>}</td>
+                                <td className="p-4 text-center">
+                                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${c.total_orders > 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700/50 text-slate-500'
+                                        }`}>{c.total_orders}</span>
+                                </td>
+                                <td className="p-4 text-right text-white font-mono">
+                                    {c.total_spent > 0 ? `$${Number(c.total_spent).toLocaleString('es-CO')}` : <span className="text-slate-600">—</span>}
+                                </td>
+                                <td className="p-4 text-right text-slate-500 text-xs">
+                                    {c.last_order_at ? new Date(c.last_order_at).toLocaleDateString('es-CO') : '—'}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
         </div>
     );
