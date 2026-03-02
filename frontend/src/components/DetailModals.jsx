@@ -84,7 +84,7 @@ export function OrderDetailModal({ order, isOpen, onClose, logo, formatCOP }) {
                         {order.receipt && (
                             <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800 flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-3">
-                                    <img src={order.receipt?.startsWith('http') ? order.receipt : `http://localhost:3000${order.receipt}`} alt="Thumbnail" className="w-12 h-12 object-cover rounded-lg border border-slate-700" />
+                                    <img src={order.receipt?.startsWith('data:') || order.receipt?.startsWith('http') ? order.receipt : `http://localhost:3000${order.receipt}`} alt="Thumbnail" className="w-12 h-12 object-cover rounded-lg border border-slate-700" />
                                     <div>
                                         <p className="text-[10px] font-black text-white uppercase tracking-wider">Comprobante Adjunto</p>
                                         <p className="text-[9px] text-slate-500 uppercase">Recibido vía WhatsApp</p>
@@ -138,7 +138,7 @@ export function ReceiptModal({ isOpen, onClose, imageUrl }) {
                     <X size={20} /> CERRAR VISTA
                 </button>
                 <div className="bg-slate-900 p-2 rounded-[2.5rem] border border-white/10 shadow-[0_30px_100px_rgba(0,0,0,0.8)] overflow-hidden">
-                    <img src={imageUrl?.startsWith('http') ? imageUrl : `http://localhost:3000${imageUrl}`} alt="Recibo Full" className="max-w-full max-h-[80vh] object-contain rounded-[2rem]" />
+                    <img src={imageUrl?.startsWith('data:') || imageUrl?.startsWith('http') ? imageUrl : `http://localhost:3000${imageUrl}`} alt="Recibo Full" className="max-w-full max-h-[80vh] object-contain rounded-[2rem]" />
                 </div>
                 <div className="bg-orange-600 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-2xl animate-bounce">
                     🏮 Por favor verifica estos datos en tu App de Banco

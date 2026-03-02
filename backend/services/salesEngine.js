@@ -46,18 +46,24 @@ export const classifyIntent = (message) => {
 const getStepInstruction = (step, customerName) => {
     const steps = {
         'BROWSING': `Estás en etapa de navegación. Tu objetivo es que el cliente elija sus productos. 
-                     Cuando el cliente tenga un pedido claro, invítalo a confirmar para proceder con los datos de envío.`,
+                     IMPORTANTE: 
+                     1. Si el cliente elige productos, incluye <cart>{"items":[...]}</cart>.
+                     2. Si el cliente ya decidió y quiere confirmar, incluye <state>AWAITING_ADDRESS</state>.
+                     3. Si el cliente ya dio su dirección y quiere pagar, incluye <state>AWAITING_PAYMENT</state>.
+                     4. Si el cliente dice que pagará por Nequi/Transferencia, incluye <create_order>Transferencia</create_order> y <state>AWAITING_RECEIPT</state>.
+                     5. Si el cliente dice que pagará en efectivo, incluye <create_order>Efectivo</create_order> y <state>COMPLETED</state>.`,
 
-        'AWAITING_ADDRESS': `El cliente ya confirmó su pedido. 
-                            OBLIGATORIO: Pide amablemente su NOMBRE y DIRECCIÓN de entrega para agendar el pedido.`,
+        'AWAITING_ADDRESS': `El cliente ya confirmó su pedido. Pide amablemente su NOMBRE y DIRECCIÓN.
+                            Si el cliente ya la proporcionó, incluye <state>AWAITING_PAYMENT</state>.`,
 
-        'AWAITING_PAYMENT': `Ya tenemos los datos de envío. 
-                            OBLIGATORIO: Pregunta si desea pagar en **Efectivo** o **Transferencia (Nequi)**.`,
+        'AWAITING_PAYMENT': `Pregunta si desea pagar en **Efectivo** o **Transferencia (Nequi)**.
+                            Si ya eligió:
+                            - Transferencia: <create_order>Transferencia</create_order> y <state>AWAITING_RECEIPT</state>.
+                            - Efectivo: <create_order>Efectivo</create_order> y <state>COMPLETED</state>.`,
 
-        'AWAITING_RECEIPT': `El cliente eligió transferencia. 
-                            DEBES enviar los datos: 💳 *Nequi: 3207008433 (Luis Castillo)* y pedir la FOTO del comprobante.`,
+        'AWAITING_RECEIPT': `Espera la FOTO del comprobante. No permitas más cambios al pedido.`,
 
-        'COMPLETED': `El pedido ya fue procesado. Sé muy amable y agradecido.`
+        'COMPLETED': `El pedido ya fue procesado. Sé muy amable.`
     };
     return steps[step] || steps['BROWSING'];
 };

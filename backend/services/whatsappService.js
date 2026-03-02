@@ -150,11 +150,12 @@ export const startWhatsApp = async () => {
                 // Detectar intención de "Confirmar pedido" para saltar a AWAITING_ADDRESS
                 const intent = classifyIntent(msg.body);
                 if (intent === 'CONFIRM_PRODUCTS' && currentStep === 'BROWSING') {
-                    // Extraer carrito temporal antes de pasar al siguiente paso
-                    // (En un sistema real, la IA ya habría ayudado a armar el cart en current_cart)
-                    // Por ahora, simulamos que lo que tiene en mente es lo que guardaremos.
-                    // Para que sea robusto, la IA debe "notar" los productos. 
-                    // IMPLEMENTACIÓN: Si el usuario confirma, pasamos a pedir datos.
+                    // Verificar si ya hay un carrito guardado
+                    const checkCart = db.prepare('SELECT current_cart FROM customers WHERE id = ?').get(customer.id);
+                    if (!checkCart?.current_cart) {
+                        await msg.reply("😉 ¡Me encanta tu entusiasmo! Pero dime primero qué te gustaría pedir para poder anotar todo bien.");
+                        return;
+                    }
                     updateCustomerState(customer.id, 'AWAITING_ADDRESS');
                     await msg.reply("🙌 ¡Excelente elección! Para finalizar, por favor regálame tu **Nombre completo** y **Dirección de entrega**.");
                     return;
@@ -163,7 +164,44 @@ export const startWhatsApp = async () => {
                 let aiResponse = await processMessage(customer, msg.body);
 
                 if (aiResponse) {
-                    // Limpieza simplificada (ya no buscamos JSON complejos de la IA)
+                    // --- EXTRACCIÓN DE CARRITO HTML-LIKE (<cart>) ---
+                    const cartMatch = aiResponse.match(/<cart>([\s\S]*?)<\/cart>/i);
+                    if (cartMatch) {
+                        try {
+                            const cartJson = JSON.parse(cartMatch[1].trim());
+                            if (cartJson && cartJson.items && cartJson.items.length > 0) {
+                                console.log(`🛒 Carrito extraído para ${customer.phone}:`, cartJson);
+                                updateCustomerState(customer.id, currentStep, cartJson);
+                            }
+                        } catch (e) {
+                            console.error('❌ Error parseando <cart> de la IA:', e.message);
+                        }
+                    }
+
+                    // --- EXTRACCIÓN DE ESTADO (<state>) ---
+                    const stateMatch = aiResponse.match(/<state>([\s\S]*?)<\/state>/i);
+                    if (stateMatch) {
+                        const newState = stateMatch[1].trim();
+                        console.log(`📌 IA solicitó cambio de estado para ${customer.phone} a: ${newState}`);
+                        updateCustomerState(customer.id, newState);
+                        currentStep = newState; // Actualizar localmente para el resto del ciclo
+                    }
+
+                    // --- EXTRACCIÓN DE CREACIÓN DE ORDEN (<create_order>) ---
+                    const orderMatch = aiResponse.match(/<create_order>([\s\S]*?)<\/create_order>/i);
+                    if (orderMatch) {
+                        const paymentMethod = orderMatch[1].trim();
+                        console.log(`📦 IA solicitó creación de orden (${paymentMethod}) para ${customer.phone}`);
+                        const order = createOrderFromState(customer.id, paymentMethod);
+                        if (order && io) {
+                            io.emit('new_order', { id: order.orderId, status: 'PENDING' });
+                        }
+                    }
+
+                    // Limpieza: Quitar etiquetas auxiliares antes de enviar al usuario
+                    aiResponse = aiResponse.replace(/<cart>[\s\S]*?<\/cart>/gi, '').trim();
+                    aiResponse = aiResponse.replace(/<state>[\s\S]*?<\/state>/gi, '').trim();
+                    aiResponse = aiResponse.replace(/<create_order>[\s\S]*?<\/create_order>/gi, '').trim();
                     aiResponse = aiResponse.replace(/```json[\s\S]*?```/gi, '').trim();
                     aiResponse = aiResponse.replace(/\{[\s\S]*?\}/gi, '').trim();
 
