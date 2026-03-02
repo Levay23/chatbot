@@ -12,7 +12,7 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL_NAME = 'llama-3.3-70b-versatile'; // Actualizado: llama3-70b-8192 fue retirado por Groq
+const MODEL_NAME = 'llama-3.3-70b-versatile'; // Restaurado a 3.3
 
 export const processMessage = async (customer, incomingMessage) => {
     console.log(`🧠 [AI - Groq] Procesando mensaje de ${customer.phone}: "${incomingMessage}"`);

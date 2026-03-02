@@ -202,13 +202,36 @@ export const startWhatsApp = async () => {
                         db.prepare('UPDATE customers SET notes = ? WHERE id = ?').run(notes, customer.id);
                     }
 
+                    // --- EXTRACCIÓN DE DATOS DE CLIENTE (<data>) ---
+                    const dataMatch = aiResponse.match(/<data>([\s\S]*?)<\/data>/i);
+                    if (dataMatch) {
+                        try {
+                            const userData = JSON.parse(dataMatch[1].trim());
+                            if (userData.name) db.prepare('UPDATE customers SET name = ? WHERE id = ?').run(userData.name, customer.id);
+                            if (userData.address) db.prepare('UPDATE customers SET address = ? WHERE id = ?').run(userData.address, customer.id);
+                            console.log(`👤 Datos de cliente actualizados para ${customer.phone}:`, userData);
+                        } catch (e) {
+                            console.error('❌ Error parseando <data> de la IA:', e.message);
+                        }
+                    }
+
                     // --- EXTRACCIÓN DE ESTADO (<state>) ---
                     const stateMatch = aiResponse.match(/<state>([\s\S]*?)<\/state>/i);
                     if (stateMatch) {
-                        const newState = stateMatch[1].trim();
-                        console.log(`📌 IA solicitó cambio de estado para ${customer.phone} a: ${newState}`);
+                        let newState = stateMatch[1].trim();
+
+                        // GUARD: No permitir estados de pago sin dirección
+                        const checkCust = db.prepare('SELECT address FROM customers WHERE id = ?').get(customer.id);
+                        const hasAddress = checkCust?.address && checkCust.address.length >= 5;
+
+                        if ((newState === 'AWAITING_PAYMENT' || newState === 'AWAITING_RECEIPT' || newState === 'COMPLETED') && !hasAddress) {
+                            console.log(`🛡️ Bloqueando salto de estado ilegal a ${newState} para ${customer.phone}`);
+                            newState = 'AWAITING_ADDRESS';
+                        }
+
+                        console.log(`📌 Cambio de estado para ${customer.phone} a: ${newState}`);
                         updateCustomerState(customer.id, newState);
-                        currentStep = newState; // Actualizar localmente para el resto del ciclo
+                        currentStep = newState;
                     }
 
                     // --- EXTRACCIÓN DE CREACIÓN DE ORDEN (<create_order>) ---
@@ -253,6 +276,7 @@ export const startWhatsApp = async () => {
                     // Limpieza: Quitar etiquetas auxiliares antes de enviar al usuario
                     aiResponse = aiResponse.replace(/<cart>[\s\S]*?<\/cart>/gi, '').trim();
                     aiResponse = aiResponse.replace(/<notes>[\s\S]*?<\/notes>/gi, '').trim();
+                    aiResponse = aiResponse.replace(/<data>[\s\S]*?<\/data>/gi, '').trim();
                     aiResponse = aiResponse.replace(/<state>[\s\S]*?<\/state>/gi, '').trim();
                     aiResponse = aiResponse.replace(/<create_order>[\s\S]*?<\/create_order>/gi, '').trim();
                     aiResponse = aiResponse.replace(/```json[\s\S]*?```/gi, '').trim();

@@ -91,7 +91,7 @@ export const getAIContext = (customerId) => {
     const summary = db.prepare('SELECT summary_text FROM memory_summary WHERE customer_id = ?').get(customerId);
 
     // 3. Obtener perfil del cliente y ESTADO actual
-    const customer = db.prepare('SELECT total_orders, preferences, notes, current_step, current_cart FROM customers WHERE id = ?').get(customerId);
+    const customer = db.prepare('SELECT total_orders, preferences, notes, current_step, current_cart, address FROM customers WHERE id = ?').get(customerId);
 
     return {
         messages: lastMessages,
@@ -103,7 +103,8 @@ export const getAIContext = (customerId) => {
         },
         state: {
             current_step: customer?.current_step || 'BROWSING',
-            current_cart: customer?.current_cart ? JSON.parse(customer.current_cart) : null
+            current_cart: customer?.current_cart ? JSON.parse(customer.current_cart) : null,
+            address: customer?.address || null
         }
     };
 };
