@@ -99,6 +99,9 @@ ${salesRulesPrompt}${productoDiaSection}
 Paso: ${state.current_step}
 Instrucción: ${stepInstruction}
 
+═══ MEMORIA Y PREFERENCIAS (HISTORIAL) ═══
+${context.memory || 'Sin historial previo.'}
+
 ═══ DATOS DEL CLIENTE ═══
 - Nombre: ${profile.name || 'Desconocido'}
 - Dirección: ${context.state.address || 'No capturada aún'}
