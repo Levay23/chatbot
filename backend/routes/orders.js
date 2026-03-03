@@ -108,9 +108,12 @@ router.post('/:id/estado', async (req, res) => {
 
             if (msg) {
                 try {
-                    const { getClient } = await import('../services/whatsappService.js');
-                    const client = getClient();
-                    if (client) await client.sendMessage(order.phone, msg);
+                    const { getWhatsAppClient } = await import('../services/whatsappService.js');
+                    const client = getWhatsAppClient();
+                    if (client) {
+                        const jid = order.phone.includes('@') ? order.phone : `${order.phone}@c.us`;
+                        await client.sendMessage(jid, msg);
+                    }
                 } catch (e) {
                     console.error('Error enviando notificación WA:', e.message);
                 }

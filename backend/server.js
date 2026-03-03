@@ -15,6 +15,7 @@ import orderRoutes, { setIO } from './routes/orders.js';
 import botRoutes from './routes/bot.js';
 import productRoutes from './routes/products.js';
 import configRoutes from './routes/config.js';
+import reportsRoutes from './routes/reports.js';
 
 dotenv.config();
 
@@ -38,6 +39,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/bot', botRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/config', configRoutes);
+app.use('/api/reports', reportsRoutes);
 
 // Set Socket.IO instance for routes that need it
 setIO(io);

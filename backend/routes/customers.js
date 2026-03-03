@@ -54,7 +54,8 @@ router.post('/:id/send-message', async (req, res) => {
         if (!customer) return res.status(404).json({ error: 'Cliente no encontrado.' });
 
         const client = getWhatsAppClient();
-        await client.sendMessage(customer.phone, message.trim());
+        const jid = customer.phone.includes('@') ? customer.phone : `${customer.phone}@c.us`;
+        await client.sendMessage(jid, message.trim());
         res.json({ ok: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -77,7 +78,8 @@ router.post('/broadcast', async (req, res) => {
         try {
             const customer = db.prepare('SELECT phone, name FROM customers WHERE id = ?').get(id);
             if (!customer) { results.push({ id, ok: false, error: 'No encontrado' }); continue; }
-            await client.sendMessage(customer.phone, message.trim());
+            const jid = customer.phone.includes('@') ? customer.phone : `${customer.phone}@c.us`;
+            await client.sendMessage(jid, message.trim());
             results.push({ id, ok: true, name: customer.name });
             // Pequeña pausa entre mensajes para no saturar WA
             await new Promise(r => setTimeout(r, 700));
@@ -88,6 +90,34 @@ router.post('/broadcast', async (req, res) => {
 
     const sent = results.filter(r => r.ok).length;
     res.json({ sent, failed: results.length - sent, results });
+});
+
+// Eliminar un cliente y sus datos asociados
+router.delete('/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        db.pragma('foreign_keys = OFF');
+        db.transaction(() => {
+            // Borrar mensajes y conversaciones
+            db.prepare('DELETE FROM messages WHERE customer_id = ?').run(id);
+            db.prepare('DELETE FROM conversations WHERE customer_id = ?').run(id);
+
+            // Opcional: ¿Borrar pedidos? 
+            // Si el usuario quiere "eliminar el cliente", usualmente implica sus rastros.
+            // Para mantener consistencia en reportes se podria dejar, 
+            // pero aqui el usuario pide limpieza manual.
+            db.prepare('DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE customer_id = ?)').run(id);
+            db.prepare('DELETE FROM orders WHERE customer_id = ?').run(id);
+
+            // Finalmente el cliente
+            db.prepare('DELETE FROM customers WHERE id = ?').run(id);
+        })();
+        db.pragma('foreign_keys = ON');
+
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
 export default router;

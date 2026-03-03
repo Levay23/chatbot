@@ -62,7 +62,7 @@ export function OrderDetailModal({ order, isOpen, onClose, logo, formatCOP }) {
                                 <div key={idx} className="grid grid-cols-12 text-sm items-center">
                                     <div className="col-span-2 font-black text-emerald-500 bg-emerald-500/10 w-fit px-2 py-0.5 rounded text-[11px]">{item.cantidad}x</div>
                                     <div className="col-span-7 px-2 text-slate-200 font-medium">{item.nombre}</div>
-                                    <div className="col-span-3 text-right font-black text-slate-400">{formatCOP(item.cantidad * item.precio)}</div>
+                                    <div className="col-span-3 text-right font-black text-slate-400">{formatCOP((item.cantidad * item.precio) || 0)}</div>
                                 </div>
                             ))}
                         </div>
@@ -97,7 +97,7 @@ export function OrderDetailModal({ order, isOpen, onClose, logo, formatCOP }) {
                         <div className="flex justify-between items-end pt-2">
                             <div className="space-y-1">
                                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Total Cancelado</p>
-                                <p className="text-3xl font-black text-emerald-400 tracking-tighter leading-none">{formatCOP(order.total)}</p>
+                                <p className="text-3xl font-black text-emerald-400 tracking-tighter leading-none">{formatCOP(order.total || 0)}</p>
                             </div>
                             <div className="text-[9px] text-slate-600 font-black italic uppercase tracking-tighter text-right">
                                 ID Orden: #{order.id}<br />
@@ -254,20 +254,20 @@ export function DailySummaryModal({ isOpen, onClose, orders, formatCOP }) {
                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 flex items-center gap-2">
                             💴 Efectivo
                         </p>
-                        <p className="text-xl font-black text-amber-500 tracking-tight">{formatCOP(cash)}</p>
+                        <p className="text-xl font-black text-amber-500 tracking-tight">{formatCOP(cash || 0)}</p>
                     </div>
                     <div className="bg-slate-800/40 p-5 rounded-3xl border border-slate-800 text-left">
                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 flex items-center gap-2">
                             💳 Transf.
                         </p>
-                        <p className="text-xl font-black text-sky-400 tracking-tight">{formatCOP(transfer)}</p>
+                        <p className="text-xl font-black text-sky-400 tracking-tight">{formatCOP(transfer || 0)}</p>
                     </div>
                     <div className="bg-emerald-500/10 col-span-2 p-6 rounded-[2rem] border border-emerald-500/20 text-left relative overflow-hidden group">
                         <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
                             <TrendingUp size={60} />
                         </div>
                         <p className="text-xs font-black text-emerald-500/70 uppercase tracking-[0.3em] mb-2">Total Recaudado</p>
-                        <p className="text-4xl font-black text-emerald-400 tracking-tighter leading-none">{formatCOP(total)}</p>
+                        <p className="text-4xl font-black text-emerald-400 tracking-tighter leading-none">{formatCOP(total || 0)}</p>
                     </div>
                 </div>
 

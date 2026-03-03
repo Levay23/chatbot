@@ -1,9 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     LayoutDashboard, Users, Grid, MessageSquare, Settings,
     RefreshCw, Plus, Volume2, VolumeX, Bell, FileText,
-    ChevronDown, Folder, Edit3, Trash, Save, Search, TrendingUp
+    ChevronDown, Folder, Edit3, Trash, Save, Search, TrendingUp,
+    Download, Star, BarChart2
 } from 'lucide-react';
+import { Line, Bar } from 'react-chartjs-2';
+import {
+    Chart as ChartJS,
+    CategoryScale, LinearScale, PointElement, LineElement,
+    BarElement, Title, Tooltip, Legend, Filler
+} from 'chart.js';
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
 import api from '../api/axios';
 import logo from '../logo.png';
 import { OrderCard, OrderColumn } from '../components/OrderBoard';
@@ -47,6 +55,14 @@ export default function Dashboard({ socket }) {
     const [isSending, setIsSending] = useState(false);
     const [broadcastResult, setBroadcastResult] = useState(null);
 
+    // Stats / Reportes
+    const [stats, setStats] = useState(null);
+    const [reportPeriod, setReportPeriod] = useState('7d');
+    const [reportTab, setReportTab] = useState('diario');
+    const [exportDateFrom, setExportDateFrom] = useState(new Date().toISOString().split('T')[0]);
+    const [exportDateTo, setExportDateTo] = useState(new Date().toISOString().split('T')[0]);
+
+
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
@@ -77,21 +93,35 @@ export default function Dashboard({ socket }) {
             setLocalActivos(initialActivos);
         } catch (error) {
             console.error('Error general in fetchData:', error);
-            if (!error.response) {
-                setConnError(true);
-            }
+            if (!error.response) setConnError(true);
         } finally {
             setLoading(false);
         }
     }, []);
 
+    const fetchStats = useCallback(async (period = '7d') => {
+        try {
+            const res = await api.get(`/reports/stats?period=${period}`);
+            setStats(res.data);
+        } catch (e) { console.error('Stats error', e); }
+    }, []);
+
+    const handleExport = async (format) => {
+        const token = localStorage.getItem('token');
+        const url = `/api/reports/export/${format}?from=${exportDateFrom}&to=${exportDateTo}`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        const blob = await res.blob();
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = `reporte_${exportDateFrom}_${exportDateTo}.${format === 'excel' ? 'xlsx' : 'pdf'}`;
+        a.click();
+    };
+
+
     useEffect(() => {
         fetchData();
+        fetchStats(reportPeriod);
         if (socket) {
-            socket.on('new_order', () => {
-                fetchData();
-                if (isVoiceEnabled) speakNewOrder();
-            });
+            socket.on('new_order', () => { fetchData(); if (isVoiceEnabled) speakNewOrder(); });
             socket.on('order_updated', () => fetchData());
             socket.on('order_deleted', () => fetchData());
         }
@@ -103,6 +133,9 @@ export default function Dashboard({ socket }) {
             }
         };
     }, [socket, fetchData, isVoiceEnabled]);
+
+    useEffect(() => { fetchStats(reportPeriod); }, [reportPeriod, fetchStats]);
+
 
     const speakNewOrder = () => {
         const msg = new SpeechSynthesisUtterance("¡Nuevo pedido recibido!");
@@ -127,6 +160,18 @@ export default function Dashboard({ socket }) {
             fetchData();
         } catch (error) {
             console.error('Error deleting order:', error);
+        }
+    };
+
+    const deleteCustomer = async (id) => {
+        if (!window.confirm('¿Eliminar este cliente y todo su historial de mensajes y pedidos? Esta acción no se puede deshacer.')) return;
+        try {
+            await api.delete(`/customers/${id}`);
+            fetchData();
+            setSelectedClients(prev => prev.filter(c => c !== id));
+        } catch (e) {
+            console.error('Delete customer error', e);
+            alert('Error al eliminar cliente: ' + (e.response?.data?.error || e.message));
         }
     };
 
@@ -270,21 +315,116 @@ export default function Dashboard({ socket }) {
         }, {});
         const sortedDates = Object.keys(groups).sort((a, b) => new Date(b) - new Date(a));
 
+        // Chart data
+        const chartLabels = stats?.dailySales?.map(d => d.date) || [];
+        const chartRevenue = stats?.dailySales?.map(d => d.revenue) || [];
+        const chartData = {
+            labels: chartLabels,
+            datasets: [{
+                label: 'Ingresos COP',
+                data: chartRevenue,
+                fill: true,
+                borderColor: '#10B981',
+                backgroundColor: 'rgba(16,185,129,0.08)',
+                tension: 0.4, pointBackgroundColor: '#10B981', pointRadius: 4
+            }]
+        };
+        const chartOptions = {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `$${ctx.raw.toLocaleString('es-CO')} COP` } } },
+            scales: {
+                x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+                y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#94a3b8', font: { size: 10 }, callback: v => `$${(v / 1000).toFixed(0)}k` } }
+            }
+        };
+
         return (
-            <div className="w-full max-w-5xl space-y-8">
-                {/* Historical Summary Header */}
-                <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-8 rounded-[2.5rem] border border-slate-700 flex items-center justify-between shadow-2xl relative overflow-hidden group">
-                    <div className="absolute -right-10 -bottom-10 opacity-5 group-hover:scale-110 transition-transform duration-700">
-                        <TrendingUp size={240} />
+            <div className="w-full max-w-6xl space-y-6">
+
+                {/* Summary cards row */}
+                <div className="grid grid-cols-3 gap-4">
+                    {[{ label: 'Hoy', rev: stats?.today?.rev, cnt: stats?.today?.cnt },
+                    { label: 'Esta semana', rev: stats?.week?.rev, cnt: stats?.week?.cnt },
+                    { label: 'Este mes', rev: stats?.month?.rev, cnt: stats?.month?.cnt }].map(p => (
+                        <div key={p.label} className="bg-slate-800/50 border border-slate-700/40 rounded-2xl p-5">
+                            <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-1">{p.label}</p>
+                            <p className="text-2xl font-black text-emerald-400">{p.rev ? `$${Number(p.rev).toLocaleString('es-CO')}` : '—'}</p>
+                            <p className="text-xs text-slate-500 mt-0.5">{p.cnt || 0} pedidos</p>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Chart + Top Products */}
+                <div className="grid grid-cols-3 gap-4">
+                    <div className="col-span-2 bg-slate-800/40 border border-slate-700/40 rounded-2xl p-5">
+                        <div className="flex items-center justify-between mb-4">
+                            <p className="text-sm font-bold text-white flex items-center gap-2"><BarChart2 size={16} className="text-emerald-400" /> Ingresos diarios</p>
+                            <div className="flex gap-1">
+                                {['7d', '30d'].map(p => (
+                                    <button key={p} onClick={() => setReportPeriod(p)}
+                                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${reportPeriod === p ? 'bg-emerald-500 text-black' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}>
+                                        {p === '7d' ? '7 días' : '30 días'}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="h-44">
+                            {chartLabels.length > 0
+                                ? <Line data={chartData} options={chartOptions} />
+                                : <div className="h-full flex items-center justify-center text-slate-600 text-sm">Sin datos para mostrar</div>}
+                        </div>
                     </div>
-                    <div className="relative z-10">
-                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.3em] mb-2 flex items-center gap-2">
-                            <TrendingUp size={14} className="text-emerald-500" /> Gran Total Histórico
-                        </h3>
-                        <p className="text-5xl font-black text-emerald-400 tracking-tighter">{formatCOP(historicalTotal)}</p>
+                    <div className="bg-slate-800/40 border border-slate-700/40 rounded-2xl p-5">
+                        <p className="text-sm font-bold text-white flex items-center gap-2 mb-4"><Star size={14} className="text-yellow-400" /> Top Productos</p>
+                        <div className="space-y-3">
+                            {(stats?.topProducts || []).map((p, i) => (
+                                <div key={p.name} className="flex items-center gap-2">
+                                    <span className="text-xs font-black text-slate-600 w-4">{i + 1}</span>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs text-white truncate">{p.name.replace(/🍗|🥩|🍲/g, '').trim()}</p>
+                                        <p className="text-[10px] text-slate-500">{p.total_qty} unidades</p>
+                                    </div>
+                                    <span className="text-xs font-bold text-emerald-400">${Number(p.revenue).toLocaleString('es-CO')}</span>
+                                </div>
+                            ))}
+                            {(!stats?.topProducts?.length) && <p className="text-slate-600 text-xs">Sin ventas aún</p>}
+                        </div>
                     </div>
-                    <div className="text-right relative z-10">
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Pedidos Finalizados</p>
+                </div>
+
+                {/* Export section */}
+                <div className="bg-slate-800/40 border border-slate-700/40 rounded-2xl p-5">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2"><Download size={12} /> Exportar Reporte</p>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-2">
+                            <label className="text-xs text-slate-500">Desde:</label>
+                            <input type="date" value={exportDateFrom} onChange={e => setExportDateFrom(e.target.value)}
+                                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-emerald-500" />
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <label className="text-xs text-slate-500">Hasta:</label>
+                            <input type="date" value={exportDateTo} onChange={e => setExportDateTo(e.target.value)}
+                                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-emerald-500" />
+                        </div>
+                        <button onClick={() => handleExport('excel')}
+                            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition-all">
+                            <Download size={12} /> Excel (.xlsx)
+                        </button>
+                        <button onClick={() => handleExport('pdf')}
+                            className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center gap-1.5 transition-all">
+                            <Download size={12} /> PDF
+                        </button>
+                    </div>
+                </div>
+
+                {/* Historical by date accordion */}
+                <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-6 rounded-2xl border border-slate-700 flex items-center justify-between">
+                    <div>
+                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.3em] mb-1 flex items-center gap-2"><TrendingUp size={14} className="text-emerald-500" /> Gran Total Histórico</h3>
+                        <p className="text-4xl font-black text-emerald-400 tracking-tighter">{formatCOP(historicalTotal || 0)}</p>
+                    </div>
+                    <div className="text-right">
+                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Pedidos Finalizados</p>
                         <p className="text-3xl font-black text-white">{facturados.length}</p>
                     </div>
                 </div>
@@ -298,20 +438,15 @@ export default function Dashboard({ socket }) {
                             <div key={date} className="bg-slate-800/40 border border-slate-700/50 rounded-2xl overflow-hidden transition-all hover:border-slate-600">
                                 <button onClick={() => setExpandedDays(prev => ({ ...prev, [date]: !prev[date] }))} className="w-full flex items-center justify-between p-5 hover:bg-slate-700/30 transition-all">
                                     <div className="flex items-center gap-4">
-                                        <div className={`p-2.5 rounded-xl border ${isExpanded ? 'bg-sky-500/20 border-sky-500/30 text-sky-400 shadow-[0_0_15px_rgba(14,165,233,0.1)]' : 'bg-slate-800 border-slate-700 text-slate-500'}`}><Folder size={18} /></div>
+                                        <div className={`p-2.5 rounded-xl border ${isExpanded ? 'bg-sky-500/20 border-sky-500/30 text-sky-400' : 'bg-slate-800 border-slate-700 text-slate-500'}`}><Folder size={18} /></div>
                                         <div className="text-left">
                                             <p className="text-sm font-black text-slate-200">{date}</p>
                                             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{dayOrders.length} PEDIDOS COMPLETADOS</p>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-8">
-                                        <div className="text-right">
-                                            <p className="text-[9px] text-emerald-500/50 font-black uppercase tracking-widest">Subtotal Día</p>
-                                            <p className="text-xl font-black text-emerald-400 tracking-tight">{formatCOP(dayTotal)}</p>
-                                        </div>
-                                        <div className={`p-1.5 rounded-full transition-all ${isExpanded ? 'bg-sky-500/10 text-sky-400 rotate-180' : 'text-slate-600'}`}>
-                                            <ChevronDown size={20} />
-                                        </div>
+                                    <div className="flex items-center gap-6">
+                                        <p className="text-xl font-black text-emerald-400">{formatCOP(dayTotal || 0)}</p>
+                                        <ChevronDown size={20} className={`text-slate-600 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                                     </div>
                                 </button>
                                 {isExpanded && (
@@ -319,10 +454,8 @@ export default function Dashboard({ socket }) {
                                         <table className="w-full text-left border-t border-slate-800/50">
                                             <thead className="bg-slate-900/50 text-[10px] text-slate-500 uppercase font-black tracking-widest">
                                                 <tr>
-                                                    <th className="p-4 pl-10">ID Orden</th>
-                                                    <th className="p-4">Cliente</th>
-                                                    <th className="p-4">Método de Pago</th>
-                                                    <th className="p-4 text-right">Total</th>
+                                                    <th className="p-4 pl-10">ID Orden</th><th className="p-4">Cliente</th>
+                                                    <th className="p-4">Método de Pago</th><th className="p-4 text-right">Total</th>
                                                     <th className="p-4 pr-10 text-right">Acción</th>
                                                 </tr>
                                             </thead>
@@ -332,17 +465,12 @@ export default function Dashboard({ socket }) {
                                                         <td className="p-4 pl-10 text-slate-600 font-mono text-xs">#{o.id}</td>
                                                         <td className="p-4 font-bold text-slate-200">{o.cliente}</td>
                                                         <td className="p-4">
-                                                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border ${o.payment_method === 'Efectivo'
-                                                                ? 'bg-amber-500/5 text-amber-500/70 border-amber-500/10'
-                                                                : 'bg-sky-500/5 text-sky-400/70 border-sky-500/10'
-                                                                }`}>{o.payment_method.toUpperCase()}</span>
+                                                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border ${o.payment_method === 'Efectivo' ? 'bg-amber-500/5 text-amber-500/70 border-amber-500/10' : 'bg-sky-500/5 text-sky-400/70 border-sky-500/10'}`}>{o.payment_method?.toUpperCase()}</span>
                                                         </td>
-                                                        <td className="p-4 text-right font-black text-emerald-400">{formatCOP(o.total)}</td>
+                                                        <td className="p-4 text-right font-black text-emerald-400">{formatCOP(o.total || 0)}</td>
                                                         <td className="p-4 pr-10 text-right">
-                                                            <button
-                                                                onClick={() => { setSelectedOrder(o); setIsDetailOpen(true); }}
-                                                                className="text-[10px] font-black text-sky-400 hover:text-sky-300 transition-colors uppercase tracking-widest bg-sky-500/10 px-3 py-1.5 rounded-lg border border-sky-500/20 opacity-0 group-hover:opacity-100"
-                                                            >
+                                                            <button onClick={() => { setSelectedOrder(o); setIsDetailOpen(true); }}
+                                                                className="text-[10px] font-black text-sky-400 hover:text-sky-300 uppercase tracking-widest bg-sky-500/10 px-3 py-1.5 rounded-lg border border-sky-500/20 opacity-0 group-hover:opacity-100">
                                                                 Ver Recibo
                                                             </button>
                                                         </td>
@@ -359,6 +487,7 @@ export default function Dashboard({ socket }) {
             </div>
         );
     };
+
 
     const renderProductos = () => {
         const categories = [...new Set(productos.map(p => p.category))];
@@ -449,23 +578,30 @@ export default function Dashboard({ socket }) {
 
     const renderConfigBot = () => (
         <div className="bg-slate-800/40 rounded-3xl border border-slate-700/50 p-8 w-full max-w-5xl space-y-10">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                    <div className="p-4 bg-sky-500/20 text-sky-400 rounded-3xl shadow-xl shadow-sky-500/5 border border-sky-500/10"><MessageSquare size={32} /></div>
-                    <div>
-                        <h2 className="text-2xl font-black text-white uppercase tracking-tight">Personalidad del AI</h2>
-                        <p className="text-slate-400 text-sm">Configura los mensajes clave que usa la Inteligencia Artificial.</p>
-                    </div>
+            <div className="flex items-center gap-4">
+                <div className="p-4 bg-sky-500/20 text-sky-400 rounded-3xl shadow-xl shadow-sky-500/5 border border-sky-500/10"><MessageSquare size={32} /></div>
+                <div>
+                    <h2 className="text-2xl font-black text-white uppercase tracking-tight">Personalidad del AI</h2>
+                    <p className="text-slate-400 text-sm">Configura los mensajes clave y el especial del día.</p>
                 </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {configBot.map(item => (
-                    <div key={item.key} className="bg-slate-900/60 p-8 rounded-[2rem] border border-slate-800 space-y-5 shadow-2xl relative group">
-                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] px-3 py-1.5 bg-slate-800 rounded-lg w-fit block border border-slate-700 shadow-sm">{item.key.replace(/_/g, ' ')}</label>
+                    <div key={item.key} className={`bg-slate-900/60 p-8 rounded-[2rem] border space-y-5 shadow-2xl relative group ${item.key === 'producto_del_dia' ? 'border-yellow-500/30 shadow-yellow-500/5' : 'border-slate-800'
+                        }`}>
+                        <div className="flex items-center gap-2">
+                            <label className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] px-3 py-1.5 bg-slate-800 rounded-lg w-fit block border border-slate-700 shadow-sm">{item.key.replace(/_/g, ' ')}</label>
+                            {item.key === 'producto_del_dia' && (
+                                <span className="text-[9px] font-black text-yellow-400 px-2 py-1 bg-yellow-500/10 border border-yellow-500/20 rounded-lg flex items-center gap-1">
+                                    <Star size={9} /> ESPECIAL DEL DÍA
+                                </span>
+                            )}
+                        </div>
                         <textarea
                             className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-5 text-sm text-slate-300 focus:border-sky-500/50 outline-none resize-none transition-all focus:ring-4 focus:ring-sky-500/5"
-                            rows={5}
+                            rows={item.key === 'producto_del_dia' ? 2 : 5}
                             defaultValue={item.value}
+                            placeholder={item.key === 'producto_del_dia' ? 'Ej: Pollo entero con yuca y ensalada $40.000 - hoy con 10% descuento' : ''}
                             onBlur={e => updateBotConfig(item.key, e.target.value)}
                         />
                         <div className="absolute top-8 right-8 text-slate-700 group-focus-within:text-sky-500 transition-colors">
@@ -476,6 +612,55 @@ export default function Dashboard({ socket }) {
             </div>
         </div>
     );
+
+    const renderSettings = () => (
+        <div className="w-full max-w-4xl space-y-8">
+            <div className="bg-slate-800/40 p-10 rounded-[3rem] border border-slate-700/50">
+                <div className="flex items-center gap-6 mb-10">
+                    <div className="p-5 bg-emerald-500/10 text-emerald-500 rounded-3xl border border-emerald-500/20 shadow-xl">
+                        <Settings size={40} />
+                    </div>
+                    <div>
+                        <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Ajustes Técnicos</h2>
+                        <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mt-1">Configuración del núcleo del sistema</p>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-6">
+                    <div className="bg-slate-900/60 p-8 rounded-[2rem] border border-slate-800 flex items-center justify-between group hover:border-emerald-500/30 transition-all">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-slate-800 rounded-2xl text-slate-400 group-hover:text-emerald-400 transition-colors">
+                                <RefreshCw size={24} />
+                            </div>
+                            <div>
+                                <p className="text-sm font-black text-white uppercase tracking-tight">Reiniciar Sincronización</p>
+                                <p className="text-xs text-slate-500">Vuelve a cargar todos los datos desde el servidor.</p>
+                            </div>
+                        </div>
+                        <button onClick={fetchData} className="px-6 py-3 bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-white rounded-xl font-black text-[10px] uppercase tracking-widest transition-all">Ejecutar</button>
+                    </div>
+
+                    <div className="bg-slate-900/60 p-8 rounded-[2rem] border border-slate-800 flex items-center justify-between group hover:border-sky-500/30 transition-all opacity-50">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-slate-800 rounded-2xl text-slate-400">
+                                <Users size={24} />
+                            </div>
+                            <div>
+                                <p className="text-sm font-black text-white uppercase tracking-tight">Gestión de Roles</p>
+                                <p className="text-xs text-slate-500 italic">Próximamente: Configura múltiples administradores.</p>
+                            </div>
+                        </div>
+                        <span className="px-4 py-1.5 bg-slate-800 text-slate-500 rounded-lg text-[9px] font-black uppercase tracking-widest border border-slate-700">BLOQUEADO</span>
+                    </div>
+                </div>
+
+                <div className="mt-12 pt-8 border-t border-slate-800 text-center">
+                    <p className="text-[10px] text-slate-600 font-black uppercase tracking-[0.4em]">ChatIA Restaurant Engine v2.4.0 (Stable)</p>
+                </div>
+            </div>
+        </div>
+    );
+
 
     const toggleClientSelect = (id) => {
         setSelectedClients(prev =>
@@ -561,6 +746,7 @@ export default function Dashboard({ socket }) {
                             <th className="p-4 text-center text-slate-400 font-semibold">Pedidos</th>
                             <th className="p-4 text-right text-slate-400 font-semibold">Total gastado</th>
                             <th className="p-4 text-right text-slate-400 font-semibold">Último pedido</th>
+                            <th className="p-4 text-right text-slate-400 font-semibold w-10">Acción</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -595,6 +781,15 @@ export default function Dashboard({ socket }) {
                                 <td className="p-4 text-right text-slate-500 text-xs">
                                     {c.last_order_at ? new Date(c.last_order_at).toLocaleDateString('es-CO') : '—'}
                                 </td>
+                                <td className="p-4 text-right">
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); deleteCustomer(c.id); }}
+                                        className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
+                                        title="Eliminar Cliente"
+                                    >
+                                        <Trash size={16} />
+                                    </button>
+                                </td>
                             </tr>
                         ))}
                     </tbody>
@@ -627,7 +822,7 @@ export default function Dashboard({ socket }) {
                 <nav className="flex-1 px-6 py-10 space-y-2 overflow-y-auto custom-scrollbar">
                     {[
                         { id: 'pedidos', icon: LayoutDashboard, label: 'Control Maestro' },
-                        { id: 'facturacion', icon: FileText, label: 'Historial de Ventas' },
+                        { id: 'facturacion', icon: FileText, label: 'Facturación' },
                         { id: 'productos', icon: Grid, label: 'Catálogo & Precios' },
                         { id: 'cms-bot', icon: MessageSquare, label: 'Entrenamiento AI' },
                         { id: 'clientes', icon: Users, label: 'Base de Clientes' },
@@ -693,15 +888,18 @@ export default function Dashboard({ socket }) {
                             <p className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.4em] mb-1">Módulo Actual</p>
                             <h1 className="text-2xl font-black text-white uppercase tracking-tighter">
                                 {activeTab === 'pedidos' ? 'Gestión de Operaciones' :
-                                    activeTab === 'facturacion' ? 'Historico de Ingresos' :
+                                    activeTab === 'facturacion' ? 'Facturación & Reportes' :
                                         activeTab === 'productos' ? 'Menú & Existencias' : 'Configuración Maestra'}
                             </h1>
                         </div>
-                        {activeTab === 'pedidos' && (
-                            <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-8 py-3.5 rounded-2xl font-black text-xs shadow-2xl shadow-emerald-500/20 active:scale-95 transition-all border-t border-white/20">
-                                <Plus size={20} /> NUEVA VENTA DIRECTA
+                        <div className="flex items-center gap-3">
+                            <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-6 py-3 rounded-2xl font-black text-[10px] shadow-2xl shadow-emerald-500/20 active:scale-95 transition-all border-t border-white/20 uppercase tracking-widest whitespace-nowrap">
+                                <Plus size={18} /> Venta Manual
                             </button>
-                        )}
+                            <button onClick={() => setIsSummaryOpen(true)} className="flex items-center gap-3 bg-slate-800 hover:bg-slate-700 text-emerald-400 px-6 py-3 rounded-2xl font-black text-[10px] shadow-xl border border-slate-700 active:scale-95 transition-all uppercase tracking-widest whitespace-nowrap">
+                                <FileText size={18} /> Cierre Diario
+                            </button>
+                        </div>
                     </div>
 
                     <div className="flex items-center gap-6 bg-slate-800/30 pl-6 pr-2 py-2 rounded-2xl border border-slate-800 group hover:border-slate-700 transition-all">
@@ -741,6 +939,7 @@ export default function Dashboard({ socket }) {
                             {activeTab === 'productos' && renderProductos()}
                             {activeTab === 'cms-bot' && renderConfigBot()}
                             {activeTab === 'clientes' && renderClientes()}
+                            {activeTab === 'settings' && renderSettings()}
                         </div>
                     )}
                 </div>

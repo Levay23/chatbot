@@ -11,8 +11,6 @@ export function ManualOrderModal({ isOpen, onClose, productos, onSubmit, formatC
         carrito: []
     });
 
-    if (!isOpen) return null;
-
     const categories = useMemo(() => {
         const cats = [...new Set(productos.map(p => p.category))];
         return cats.sort();
@@ -24,6 +22,8 @@ export function ManualOrderModal({ isOpen, onClose, productos, onSubmit, formatC
             p.name.toLowerCase().includes(searchTerm.toLowerCase())
         );
     }, [productos, searchTerm]);
+
+    if (!isOpen) return null;
 
     const addToCart = (prod) => {
         setFormData(prev => {
@@ -64,7 +64,7 @@ export function ManualOrderModal({ isOpen, onClose, productos, onSubmit, formatC
             <div className="bg-slate-900 border border-slate-700 w-full max-w-4xl rounded-[2rem] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-300">
                 <div className="px-8 py-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
                     <div>
-                        <h2 className="text-2xl font-black text-white uppercase tracking-tight">Nueva Orden Manual</h2>
+                        <h2 className="text-2xl font-black text-white uppercase tracking-tight">Venta Manual</h2>
                         <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Gestión de venta directa</p>
                     </div>
                     <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 transition-colors">
@@ -104,7 +104,7 @@ export function ManualOrderModal({ isOpen, onClose, productos, onSubmit, formatC
                                                 >
                                                     <div className="flex flex-col">
                                                         <span className="text-sm font-bold text-slate-200">{p.name}</span>
-                                                        <span className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">{formatCOP(p.price)}</span>
+                                                        <span className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">{formatCOP(p.price || 0)}</span>
                                                     </div>
                                                     <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl opacity-0 group-hover:opacity-100 transition-all">
                                                         <Plus size={16} />

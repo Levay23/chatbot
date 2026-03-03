@@ -57,6 +57,6 @@ echo   ¡INSTALACION COMPLETADA CON EXITO!
 echo ===================================================
 echo.
 echo Para iniciar el sistema en el futuro, simplemente da doble clic en:
-echo iniciar_sistema.bat
+echo ejecutar_sistema.bat
 echo.
 pause

@@ -65,21 +65,31 @@ export const startWhatsApp = async () => {
                 let currentStep = context.state.current_step;
 
                 // --- 0. MANEJO DE NOTAS DE VOZ (Transcripción) ---
-                if (msg.type === 'audio' || msg.type === 'ptt') {
+                if (msg.type === 'audio' || msg.type === 'ptt' || msg.hasMedia && (msg.mimetype?.includes('audio') || msg.body?.includes('.ogg'))) {
+                    console.log(`🎙️ Procesando nota de voz de ${msg.from}...`);
                     try {
                         const media = await msg.downloadMedia();
                         if (media) {
+                            console.log(`📥 Media descargada (${media.mimetype}), enviando a Whisper...`);
                             const audioBuffer = Buffer.from(media.data, 'base64');
                             const transcription = await transcribeAudio(audioBuffer, media.mimetype);
 
-                            if (transcription) {
-                                console.log(`🎤 Audio transcrito para ${msg.from}: ${transcription}`);
+                            if (transcription && transcription.trim().length > 0) {
+                                console.log(`🎤 Transcripción exitosa para ${msg.from}: "${transcription}"`);
                                 msg.body = transcription; // Inyectamos el texto para que siga el flujo normal
+                            } else {
+                                console.warn(`⚠️ Transcripción vacía o nula para ${msg.from}`);
+                                await msg.reply("😅 Amigo, el audio me llegó vacío o no pude entenderlo. ¿Me lo repites o me lo escribes?");
+                                return;
                             }
+                        } else {
+                            console.error(`❌ No se pudo descargar la media de ${msg.from}`);
+                            await msg.reply("⚠️ Tuve un problema al descargar tu audio. ¿Podrías enviarlo de nuevo?");
+                            return;
                         }
                     } catch (transcErr) {
-                        console.error('❌ Error transcribiendo audio:', transcErr.message);
-                        await msg.reply("😅 Amigo, no alcancé a escucharte bien. ¿Me lo puedes escribir o enviar de nuevo?");
+                        console.error('❌ Error crítico en flujo de audio:', transcErr.message);
+                        await msg.reply("😅 Disculpa, mi sistema de oído está fallando un poco. ¿Podrías escribirme tu pedido por ahora?");
                         return;
                     }
                 }

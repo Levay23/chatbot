@@ -99,38 +99,53 @@ export const processMessage = async (customer, incomingMessage) => {
  * @returns {Promise<string>} - El texto transcrito
  */
 export const transcribeAudio = async (audioBuffer, mimetype) => {
-    console.log(`🎙️ [AI - Whisper] Transcribiendo audio (${mimetype})...`);
+    // Limpiar mimetype (ej: "audio/ogg; codecs=opus" -> "audio/ogg")
+    const cleanMimeType = mimetype.split(';')[0].trim();
+    console.log(`🎙️ [AI - Whisper] Transcribiendo audio (${cleanMimeType}), tamaño: ${audioBuffer.length} bytes...`);
 
     const apiKeys = [GROQ_API_KEY, GROQ_API_KEY_2].filter(Boolean);
 
     for (const apiKey of apiKeys) {
         try {
             const formData = new FormData();
-            const stream = Readable.from(audioBuffer);
-            const filename = mimetype.includes('ogg') ? 'audio.ogg' : 'audio.mp3';
 
-            formData.append('file', stream, { filename, contentType: mimetype });
+            // Usar el Buffer directamente es más robusto que un Stream en muchas versiones de form-data
+            const extension = cleanMimeType.includes('ogg') ? 'ogg' :
+                cleanMimeType.includes('mp4') ? 'm4a' :
+                    cleanMimeType.includes('mpeg') ? 'mp3' : 'mp3';
+            const filename = `audio.${extension}`;
+
+            formData.append('file', audioBuffer, { filename, contentType: cleanMimeType });
             formData.append('model', 'whisper-large-v3-turbo');
             formData.append('language', 'es');
-            formData.append('response_format', 'text');
+            formData.append('response_format', 'json');
 
             const response = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', formData, {
                 headers: { ...formData.getHeaders(), 'Authorization': `Bearer ${apiKey}` },
-                timeout: 20000
+                timeout: 25000
             });
 
-            const transcription = typeof response.data === 'string' ? response.data : response.data.text;
+            const transcription = response.data.text;
+            if (!transcription || transcription.trim().length === 0) {
+                console.warn('⚠️ Transcripción vacía recibida.');
+                return null;
+            }
+
             console.log(`📝 Transcripción exitosa: "${transcription}"`);
             return transcription;
         } catch (error) {
+            const errorMsg = error.response?.data?.error?.message || error.message;
             if (error.response?.status === 429) {
                 console.warn(`⚠️ Key ${apiKeys.indexOf(apiKey) + 1} agotada para audio. Rotando...`);
                 continue;
             }
-            console.error('❌ Error en Transcripción Whisper:', error.response?.data || error.message);
+            console.error('❌ Error en Transcripción Whisper:', errorMsg);
+            // Si es un error de formato o archivo inválido, no sirve rotar keys
+            if (errorMsg.includes('format') || errorMsg.includes('valid media')) break;
+
             throw new Error('No pude entender el audio, ¿podrías repetírmelo por texto?');
         }
     }
 
-    throw new Error('No pude entender el audio, ¿podrías repetírmelo por texto?');
+    return null;
 };

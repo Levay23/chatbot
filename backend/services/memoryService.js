@@ -165,11 +165,18 @@ export const getHistory = (customerId, limit = 50) => {
 };
 
 export const getOrCreateCustomer = (phone, name) => {
-    let customer = db.prepare('SELECT * FROM customers WHERE phone = ?').get(phone);
+    // Limpiar el JID para quedarnos solo con el número (ej: 573... @c.us -> 573...)
+    const cleanPhone = phone.split('@')[0];
+
+    let customer = db.prepare('SELECT * FROM customers WHERE phone = ?').get(cleanPhone);
     if (!customer) {
         const result = db.prepare('INSERT INTO customers (phone, name, current_step) VALUES (?, ?, ?)')
-            .run(phone, name, 'BROWSING');
-        customer = { id: result.lastInsertRowid, phone, name, current_step: 'BROWSING' };
+            .run(cleanPhone, name, 'BROWSING');
+        customer = { id: result.lastInsertRowid, phone: cleanPhone, name, current_step: 'BROWSING' };
+    } else if (name && (customer.name === 'Cliente' || !customer.name)) {
+        // Actualizar nombre si el actual es genérico o nulo
+        db.prepare('UPDATE customers SET name = ? WHERE id = ?').run(name, customer.id);
+        customer.name = name;
     }
     return customer;
 };

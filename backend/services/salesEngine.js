@@ -83,11 +83,17 @@ export const buildSystemPrompt = (mode, context, filteredMenu, config = {}) => {
         ? (config.payment_info || "Nequi: 3207008433 - Luis Castillo")
         : "";
 
+    // PRODUCTO DEL DÍA
+    const productoDia = config.producto_del_dia?.trim();
+    const productoDiaSection = productoDia
+        ? `\n\n🌟 ESPECIAL DEL DÍA → Menciónalo proactivamente: ${productoDia}`
+        : "";
+
     const stepInstruction = getStepInstruction(state.current_step, profile.name, paymentInfo);
 
     return `${personalityPrompt}
 
-${salesRulesPrompt}
+${salesRulesPrompt}${productoDiaSection}
 
 ═══ ESTADO ACTUAL ═══
 Paso: ${state.current_step}

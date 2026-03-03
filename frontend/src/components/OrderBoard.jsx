@@ -105,7 +105,7 @@ export function OrderCard({ order, onMove, nextLabel, onDelete, onDetail, onRece
                     <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase w-fit mb-1 ${order.payment_method === 'Efectivo' ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-orange-500/20 text-orange-400 border border-orange-500/30'}`}>
                         {order.payment_method || 'Efectivo'}
                     </span>
-                    <div className="text-xl font-bold text-emerald-400 tracking-tight leading-none">{formatCOP(order.total)}</div>
+                    <div className="text-xl font-bold text-emerald-400 tracking-tight leading-none">{formatCOP(order.total || 0)}</div>
                 </div>
                 {onMove && (
                     <button
