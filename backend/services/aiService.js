@@ -7,15 +7,13 @@ import db from '../database/db.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { EdgeTTS } from 'edge-tts-node';
+import { MsEdgeTTS } from 'edge-tts-node';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
-// Instancia única de EdgeTTS para reusar conexión si es necesario
-const tts = new EdgeTTS({
-    voice: 'es-CO-GonzaloNeural', // Voz por defecto (Colombia Masculina)
-    lang: 'es-CO',
-    outputFormat: 'audio-24khz-48kbitrate-mono-mp3'
+// Instancia única de MsEdgeTTS
+const tts = new MsEdgeTTS({
+    enableLogger: false
 });
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -178,8 +176,21 @@ export const synthesizeSpeech = async (text) => {
 
         if (!cleanText) return null;
 
-        const buffer = await tts.getAudioBuffer(cleanText);
-        return buffer;
+        // Configurar metadatos antes de generar el stream
+        await tts.setMetadata('es-CO-GonzaloNeural', 'audio-24khz-48kbitrate-mono-mp3');
+        const stream = tts.toStream(cleanText);
+
+        const chunks = [];
+        for await (const chunk of stream) {
+            chunks.push(chunk);
+        }
+
+        if (chunks.length === 0) {
+            console.warn('⚠️ No se recibió data de audio del stream.');
+            return null;
+        }
+
+        return Buffer.concat(chunks);
     } catch (error) {
         console.error('❌ Error en Síntesis de Voz:', error.message);
         return null;
