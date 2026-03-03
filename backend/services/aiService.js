@@ -7,14 +7,12 @@ import db from '../database/db.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { MsEdgeTTS } from 'edge-tts-node';
+import { EdgeTTS } from 'node-edge-tts';
+import fs from 'fs/promises';
+import os from 'os';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '../.env') });
-
-// Instancia única de MsEdgeTTS
-const tts = new MsEdgeTTS({
-    enableLogger: false
-});
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_API_KEY_2 = process.env.GROQ_API_KEY_2;
@@ -162,37 +160,47 @@ export const transcribeAudio = async (audioBuffer, mimetype) => {
  * @returns {Promise<Buffer>} - El buffer del audio MP3
  */
 export const synthesizeSpeech = async (text) => {
+    let tempPath = null;
     try {
-        console.log(`🔊 [AI - TTS] Sintetizando voz: "${text.substring(0, 50)}..."`);
+        console.log(`🔊 [AI - TTS] Sintetizando voz (Salome): "${text.substring(0, 50)}..."`);
 
-        // Limpiar el texto de emojis o markdown que puedan sonar mal
+        // Limpiar el texto de emojis, markdown y moneda para que la voz sea natural
         const cleanText = text
-            .replace(/\*/g, '')
-            .replace(/_/g, '')
-            .replace(/#/g, '')
-            .replace(/!/g, '')
-            .replace(/\[.*?\]/g, '')
+            .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1F1E6}-\u{1F1FF}]/gu, '') // Eliminar Emojis
+            .replace(/\*/g, '') // Eliminar negritas
+            .replace(/_/g, '')  // Eliminar cursivas
+            .replace(/#/g, '')  // Eliminar símbolos de encabezado
+            .replace(/!/g, '')  // Eliminar exclamaciones excesivas (opcional, pero ayuda al tono)
+            .replace(/COP/gi, '') // Eliminar moneda
+            .replace(/dólares/gi, '')
+            .replace(/dólar/gi, '')
+            .replace(/pesos/gi, '')
+            .replace(/\$/g, '')   // Eliminar símbolo de peso
+            .replace(/\[.*?\]/g, '') // Eliminar bloques tipo JSON o anotaciones
+            .replace(/\s+/g, ' ') // Normalizar espacios
             .trim();
 
         if (!cleanText) return null;
 
-        // Configurar metadatos antes de generar el stream
-        await tts.setMetadata('es-CO-GonzaloNeural', 'audio-24khz-48kbitrate-mono-mp3');
-        const stream = tts.toStream(cleanText);
+        const tts = new EdgeTTS({
+            voice: 'es-CO-SalomeNeural',
+            lang: 'es-CO',
+            outputFormat: 'audio-24khz-48kbitrate-mono-mp3'
+        });
 
-        const chunks = [];
-        for await (const chunk of stream) {
-            chunks.push(chunk);
-        }
+        tempPath = path.join(os.tmpdir(), `tts_${Date.now()}_${Math.floor(Math.random() * 1000)}.mp3`);
 
-        if (chunks.length === 0) {
-            console.warn('⚠️ No se recibió data de audio del stream.');
-            return null;
-        }
+        await tts.ttsPromise(cleanText, tempPath);
 
-        return Buffer.concat(chunks);
+        const buffer = await fs.readFile(tempPath);
+
+        // Limpieza asíncrona
+        fs.unlink(tempPath).catch(err => console.error('⚠️ Error limpiando TTS temp:', err));
+
+        return buffer;
     } catch (error) {
-        console.error('❌ Error en Síntesis de Voz:', error.message);
+        console.error('❌ Error crítico en Síntesis de Voz:', error);
+        if (tempPath) fs.unlink(tempPath).catch(() => { });
         return null;
     }
 };
