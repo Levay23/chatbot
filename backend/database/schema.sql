@@ -58,4 +58,5 @@ INSERT OR IGNORE INTO config_bot (key, value) VALUES
 ('bot_active', 'false'),
 ('greeting', '✨ *¡Bienvenido a El Rincón del Sancocho, Pollo y Carnes!* 🥩🍲🍗\n¡Qué gusto saludarte! Soy tu asistente virtual y estoy aquí para ayudarte.'),
 ('farewell', '✅ *¡Gracias por tu pedido!* Lo estamos preparando con mucho amor. Próximamente recibirás actualizaciones.'),
-('payment_info', '💳 *Datos para transferencia Nequi:*\n📱 Número: 3207008433\n👤 A nombre de: Luis Castillo\n\nEnvía foto del comprobante para procesar tu pedido.');
+('payment_info', '💳 *Datos para transferencia Nequi:*\n📱 Número: 3207008433\n👤 A nombre de: Luis Castillo\n\nEnvía foto del comprobante para procesar tu pedido.'),
+('bot_voice_mode', 'text');

@@ -1,8 +1,7 @@
-import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth } = pkg;
+const { Client, LocalAuth, MessageMedia } = pkg;
 import qrcode from 'qrcode-terminal';
 import { getOrCreateCustomer, getAIContext, updateCustomerState } from './memoryService.js';
-import { processMessage, transcribeAudio } from './aiService.js';
+import { processMessage, transcribeAudio, synthesizeSpeech } from './aiService.js';
 import { createOrderFromState } from './orderService.js';
 import { classifyIntent } from './salesEngine.js';
 import { exec } from 'child_process';
@@ -302,10 +301,51 @@ export const startWhatsApp = async () => {
 
                     if (aiResponse) {
                         try {
-                            await msg.reply(aiResponse);
-                        } catch (replyErr) {
-                            const chat = await msg.getChat();
-                            await chat.sendMessage(aiResponse);
+                            // Obtener configuración de voz del bot
+                            const voiceModeConfig = db.prepare("SELECT value FROM config_bot WHERE key = 'bot_voice_mode'").get();
+                            const voiceMode = voiceModeConfig ? voiceModeConfig.value : 'text'; // default 'text'
+
+                            if (voiceMode === 'text') {
+                                try {
+                                    await msg.reply(aiResponse);
+                                } catch (replyErr) {
+                                    const chat = await msg.getChat();
+                                    await chat.sendMessage(aiResponse);
+                                }
+                            } else {
+                                // Generar audio para 'both' o 'voice'
+                                const audioBuffer = await synthesizeSpeech(aiResponse);
+
+                                if (audioBuffer) {
+                                    const media = new MessageMedia('audio/mp3', audioBuffer.toString('base64'), 'response.mp3');
+
+                                    if (voiceMode === 'both') {
+                                        // Texto + Voz
+                                        try {
+                                            await msg.reply(aiResponse);
+                                        } catch (replyErr) {
+                                            const chat = await msg.getChat();
+                                            await chat.sendMessage(aiResponse);
+                                        }
+                                        await clientInstance.sendMessage(msg.from, media, { sendAudioAsVoice: true });
+                                    } else if (voiceMode === 'voice') {
+                                        // Solo Voz
+                                        await clientInstance.sendMessage(msg.from, media, { sendAudioAsVoice: true });
+                                    }
+                                } else {
+                                    // Fallback si falla la síntesis: enviar texto
+                                    try {
+                                        await msg.reply(aiResponse);
+                                    } catch (replyErr) {
+                                        const chat = await msg.getChat();
+                                        await chat.sendMessage(aiResponse);
+                                    }
+                                }
+                            }
+                        } catch (respErr) {
+                            console.error('❌ Error enviando respuesta (voz/texto):', respErr.message);
+                            // Fallback final
+                            await msg.reply(aiResponse).catch(() => { });
                         }
                     }
                 }

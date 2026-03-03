@@ -3,7 +3,7 @@ import {
     LayoutDashboard, Users, Grid, MessageSquare, Settings,
     RefreshCw, Plus, Volume2, VolumeX, Bell, FileText,
     ChevronDown, Folder, Edit3, Trash, Save, Search, TrendingUp,
-    Download, Star, BarChart2
+    Download, Star, BarChart2, Mic, Type, MessageSquarePlus
 } from 'lucide-react';
 import { Line, Bar } from 'react-chartjs-2';
 import {
@@ -866,16 +866,43 @@ export default function Dashboard({ socket }) {
                                 const current = configBot.find(c => c.key === 'bot_active')?.value === 'true';
                                 updateBotConfig('bot_active', current ? 'false' : 'true');
                             }}
-                            className={`w-full py-3 rounded-xl text-[10px] font-black uppercase tracking-tight transition-all active:scale-95 ${configBot.find(c => c.key === 'bot_active')?.value === 'true'
+                            className={`w-full py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all active:scale-95 shadow-xl ${configBot.find(c => c.key === 'bot_active')?.value === 'true'
                                 ? 'bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20'
-                                : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400 shadow-lg'
+                                : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400 border-t border-white/30'
                                 }`}
                         >
-                            {configBot.find(c => c.key === 'bot_active')?.value === 'true' ? 'Apagar Bot' : 'Encender Bot'}
+                            {configBot.find(c => c.key === 'bot_active')?.value === 'true' ? 'Apagar Sistema' : 'Encender Sistema'}
                         </button>
 
-                        <button onClick={() => setIsVoiceEnabled(!isVoiceEnabled)} className={`w-full py-3 rounded-xl flex items-center justify-center gap-3 text-[10px] font-black uppercase tracking-widest transition-all ${isVoiceEnabled ? 'bg-slate-800 text-emerald-400 border border-emerald-500/20' : 'bg-slate-800/40 text-slate-600 border border-transparent'}`}>
-                            {isVoiceEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />} Audio {isVoiceEnabled ? 'DIAL' : 'MUDO'}
+                        <div className="space-y-3 pt-4 border-t border-slate-800/50">
+                            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-2 block">Modo de Respuesta</span>
+                            <div className="grid grid-cols-3 gap-1 bg-slate-800/50 p-1 rounded-xl border border-slate-700/30">
+                                {[
+                                    { id: 'text', label: 'TXT', icon: Type },
+                                    { id: 'both', label: 'T+V', icon: MessageSquarePlus },
+                                    { id: 'voice', label: 'VOZ', icon: Mic }
+                                ].map(m => {
+                                    const active = (configBot.find(c => c.key === 'bot_voice_mode')?.value || 'text') === m.id;
+                                    return (
+                                        <button
+                                            key={m.id}
+                                            onClick={() => updateBotConfig('bot_voice_mode', m.id)}
+                                            className={`flex flex-col items-center gap-1.5 py-2.5 rounded-lg transition-all ${active
+                                                ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/10'
+                                                : 'text-slate-500 hover:text-slate-400 hover:bg-slate-700/50'
+                                                }`}
+                                            title={m.label === 'TXT' ? 'Solo Texto' : m.label === 'T+V' ? 'Texto + Voz' : 'Solo Voz'}
+                                        >
+                                            <m.icon size={14} />
+                                            <span className="text-[7px] font-black">{m.label}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <button onClick={() => setIsVoiceEnabled(!isVoiceEnabled)} className={`w-full py-2.5 rounded-xl flex items-center justify-center gap-2 text-[9px] font-black uppercase tracking-widest transition-all ${isVoiceEnabled ? 'text-emerald-500 hover:text-emerald-400' : 'text-slate-700 hover:text-slate-600'}`}>
+                            {isVoiceEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />} Avisos {isVoiceEnabled ? 'ON' : 'OFF'}
                         </button>
                     </div>
                 </div>
